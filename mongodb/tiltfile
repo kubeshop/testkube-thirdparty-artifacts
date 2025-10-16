@@ -1,0 +1,18 @@
+def deploy_testkube_instances(version):
+  """
+  Deploys the Testkube and MongoDB instance using Helm charts into this folder.
+  """
+
+docker_build(
+  'testkube/mongodb:8.0.15',
+  context='.',
+  dockerfile='mongo-8.dockerfile'
+)
+
+yaml = helm('./helm', name='mongodb', values='values.demo.yaml', set=[
+  'fullnameOverride=testkube-enterprise-mongodb',
+  'image.repository=testkube/mongodb:8.0.15',
+  'image.tag=8.0.15'
+])
+
+k8s_yaml(yaml)
