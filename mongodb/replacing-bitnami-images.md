@@ -1,5 +1,10 @@
 # Replacing MongoDB image and helm chart
 
+Techs used to test:
+
+* Kubernetes Kind.
+* Tilt.
+
 ## Using official image and helm chart
 
 Artifacts to test:
@@ -42,6 +47,13 @@ Steps used to test:
    ```bash
    tilt up
    ```
+
+To clean up run the following commands:
+
+```bash
+tilt down
+tilt docker-prune
+```
 
 ### Testkube OSS
 
