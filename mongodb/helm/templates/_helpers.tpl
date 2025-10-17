@@ -10,13 +10,29 @@ mongo-name
 {{- define "common.names.fullname" -}}
 mongo-fullname
 {{- end -}}
+{{- define "common.names.namespace" -}}
+  {{- if .Values.global }}
+    {{- if .Values.global.namespaceOverride }}
+      {{- .Values.global.namespaceOverride -}}
+    {{- else -}}
+      {{- .Release.Namespace -}}
+    {{- end -}}
+  {{- else -}}
+    {{- .Release.Namespace -}}
+  {{- end -}}
+{{- end -}}
 {{- define "common.labels.standard" -}}
-common-labels: test
+app.kubernetes.io/name: mongodb
+app.kubernetes.io/instance: {{ .context.Release.Name }}
+app.kubernetes.io/component: mongodb
+app.kubernetes.io/managed-by: {{ .context.Release.Service }}
 {{- end -}}
 {{- define "common.tplvalues.merge" -}}
 {{- end -}}
 {{- define "common.labels.matchLabels" -}}
-common-matches-labels: test
+app.kubernetes.io/name: mongodb
+app.kubernetes.io/instance: {{ .context.Release.Name }}
+app.kubernetes.io/component: mongodb
 {{- end -}}
 {{- define "common.storage.class" -}}
 {{- end -}}
@@ -142,6 +158,143 @@ preferredDuringSchedulingIgnoredDuringExecution:
     {{- include "common.affinities.pods.soft" . -}}
   {{- else if eq .type "hard" }}
     {{- include "common.affinities.pods.hard" . -}}
+  {{- end -}}
+{{- end -}}
+{{- define "common.affinities.nodes" -}}
+  {{- if .type }}
+  requiredDuringSchedulingIgnoredDuringExecution:
+    nodeSelectorTerms:
+    - matchExpressions:
+      - key: {{ .key | quote }}
+        operator: In
+        values:
+        {{- range .values }}
+        - {{ . | quote }}
+        {{- end }}
+  {{- end -}}
+{{- end -}}
+{{- define "common.tplvalues.render" -}}
+  {{- if typeIs "string" .value }}
+    {{- .value -}}
+  {{- else }}
+    {{- toYaml .value -}}
+  {{- end -}}
+{{- end -}}
+{{- define "common.images.image" -}}
+  {{- $registryName := .imageRoot.registry -}}
+  {{- $repositoryName := .imageRoot.repository -}}
+  {{- $tag := .imageRoot.tag | default "latest" -}}
+  {{- if .global }}
+    {{- if .global.imageRegistry }}
+      {{- $registryName = .global.imageRegistry -}}
+    {{- end -}}
+  {{- end -}}
+  {{- if $registryName }}
+    {{- printf "%s/%s:%s" $registryName $repositoryName $tag -}}
+  {{- else -}}
+    {{- printf "%s:%s" $repositoryName $tag -}}
+  {{- end -}}
+{{- end -}}
+{{- define "common.resources.preset" -}}
+  {{- if eq .type "small" }}
+  requests:
+    memory: "128Mi"
+    cpu: "100m"
+  limits:
+    memory: "256Mi"
+    cpu: "200m"
+  {{- else if eq .type "medium" }}
+  requests:
+    memory: "256Mi"
+    cpu: "200m"
+  limits:
+    memory: "512Mi"
+    cpu: "500m"
+  {{- else if eq .type "large" }}
+  requests:
+    memory: "512Mi"
+    cpu: "500m"
+  limits:
+    memory: "1Gi"
+    cpu: "1000m"
+  {{- end -}}
+{{- end -}}
+{{- define "common.compatibility.renderSecurityContext" -}}
+  {{- if .secContext }}
+  {{- toYaml .secContext -}}
+  {{- end -}}
+{{- end -}}
+{{- define "common.capabilities.statefulset.apiVersion" -}}
+  {{- if semverCompare "<1.14-0" (include "common.capabilities.kubeVersion" .) -}}
+  {{- print "apps/v1beta2" -}}
+  {{- else -}}
+  {{- print "apps/v1" -}}
+  {{- end -}}
+{{- end -}}
+{{- define "common.secrets.passwords.manage" -}}
+  {{- $secretName := .secret -}}
+  {{- $key := .key -}}
+  {{- $providedValues := .providedValues -}}
+  {{- $context := .context -}}
+  {{- $password := "" -}}
+  {{- range $providedValues -}}
+    {{- if $context.Values -}}
+      {{- $value := get $context.Values . -}}
+      {{- if $value -}}
+        {{- $password = $value -}}
+        {{- break -}}
+      {{- end -}}
+    {{- end -}}
+  {{- end -}}
+  {{- if not $password -}}
+    {{- $password = randAlphaNum 10 -}}
+  {{- end -}}
+  {{- printf "name: %s\n  valueFrom:\n    secretKeyRef:\n      name: %s\n      key: %s" $key $secretName $key -}}
+{{- end -}}
+{{- define "common.capabilities.psp.supported" -}}
+  {{- if semverCompare ">=1.25-0" (include "common.capabilities.kubeVersion" .) -}}
+    {{- print "false" -}}
+  {{- else -}}
+    {{- print "true" -}}
+  {{- end -}}
+{{- end -}}
+{{- define "common.capabilities.networkPolicy.apiVersion" -}}
+  {{- if semverCompare ">=1.4-0" (include "common.capabilities.kubeVersion" .) -}}
+    {{- print "networking.k8s.io/v1" -}}
+  {{- else -}}
+    {{- print "extensions/v1beta1" -}}
+  {{- end -}}
+{{- end -}}
+{{- define "common.warnings.rollingTag" -}}
+  {{- if and .tag (or (eq .tag "latest") (eq .tag "stable") (eq .tag "rolling")) -}}
+WARNING: You are using an unstable tag and this is not recommended for production.
+  {{- end -}}
+{{- end -}}
+{{- define "common.warnings.resources" -}}
+  {{- $sections := .sections -}}
+  {{- $context := .context -}}
+  {{- range $sections -}}
+    {{- $section := . -}}
+    {{- if $section -}}
+      {{- $resources := get $context.Values $section -}}
+      {{- if $resources -}}
+        {{- $resourcesValue := get $resources "resources" -}}
+        {{- if not $resourcesValue -}}
+WARNING: No resources defined for {{ $section }}. Consider setting resources.
+        {{- end -}}
+      {{- end -}}
+    {{- end -}}
+  {{- end -}}
+{{- end -}}
+{{- define "common.warnings.modifiedImages" -}}
+  {{- $images := .images -}}
+  {{- $context := .context -}}
+  {{- range $images -}}
+    {{- if .repository -}}
+      {{- if not (hasPrefix "bitnami/" .repository) -}}
+WARNING: Image {{ .repository }} has been modified from the default Bitnami image.
+      {{- end -}}
+    {{- end -}}
   {{- end -}}
 {{- end -}}
 {{/* TODO: remove common reference */}}
