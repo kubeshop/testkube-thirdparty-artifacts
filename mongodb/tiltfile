@@ -27,7 +27,8 @@ metadata:
   yaml = helm('./helm', name='testkube-enterprise-mongodb', namespace='testkube-%s' % version.replace(".", "-"), set=[
     'fullnameOverride=testkube-enterprise-mongodb',
     'image.repository=testkube/mongodb:8.0.15',
-    'image.tag=8.0.15'
+    'image.tag=8.0.15',
+    'auth.enabled=false',
   ])
   k8s_yaml(yaml)
   print("Deploying Testkube version: %s" % version)
