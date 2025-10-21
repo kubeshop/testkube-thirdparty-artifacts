@@ -2,8 +2,21 @@ def version_list():
   """
   Returns a list of Testkube versions pulled to local folder.
   """
-  charts_list = local('ls -A ../charts | tr -d "tke-"')
-  return str(charts_list).strip().split("\n")
+
+
+  # Prefer explicit TESTKUBE_VERSION env var if provided
+  explicit_version = os.getenv('TESTKUBE_VERSION', '')
+  if explicit_version:
+    return [explicit_version]
+
+  # Otherwise, attempt to infer from ../charts, ignoring empty results
+  charts_list = local('ls -A ../charts | tr -d "tke-"', quiet=True)
+  inferred_versions = [v for v in str(charts_list).strip().split("\n") if v]
+  if inferred_versions:
+    return inferred_versions
+
+  # Final fallback to a sane default to avoid invalid namespaces like "testkube-"
+  return ["8.0.15"]
 
 def deploy_testkube_instances(version):
   """
@@ -30,6 +43,24 @@ metadata:
     'image.repository=testkube/mongodb',
     'image.tag=8.0.15',
     'auth.enabled=false',
+    # Align chart with official mongo image expectations
+    'persistence.mountPath=/data/db',
+    # Disable volumePermissions init to avoid pulling unavailable image; rely on fsGroup
+    'volumePermissions.enabled=false',
+    # Align security context with upstream mongo image user/group (commonly 999)
+    'containerSecurityContext.runAsUser=999',
+    'podSecurityContext.fsGroup=999',
+    # Replace Bitnami script-based probes (not present in our image) with TCP socket probes
+    'livenessProbe.enabled=false',
+    'readinessProbe.enabled=false',
+    'customLivenessProbe.tcpSocket.port=27017',
+    'customLivenessProbe.initialDelaySeconds=30',
+    'customLivenessProbe.periodSeconds=20',
+    'customLivenessProbe.timeoutSeconds=10',
+    'customReadinessProbe.tcpSocket.port=27017',
+    'customReadinessProbe.initialDelaySeconds=5',
+    'customReadinessProbe.periodSeconds=10',
+    'customReadinessProbe.timeoutSeconds=5',
   ])
   k8s_yaml(yaml)
   # print("Deploying Testkube version: %s" % version)
