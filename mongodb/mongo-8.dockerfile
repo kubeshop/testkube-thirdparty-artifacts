@@ -46,17 +46,49 @@ COPY --from=builder /usr/local/bin/mongorestore /usr/bin/mongorestore
 COPY --from=builder /usr/local/bin/mongostat /usr/bin/mongostat
 COPY --from=builder /usr/local/bin/mongotop /usr/bin/mongotop
 
-# Apply Ubuntu security patches
+# Apply Ubuntu security patches and update vulnerable packages
 RUN apt-get update && \
     apt-get upgrade -y && \
-    apt-get clean && \
-    rm -rf /var/lib/apt/lists/*
+    # Install latest versions of packages with CVE issues to get patches
+    apt-get install -y --only-upgrade \
+        coreutils \
+        libssl3t64 \
+        openssl \
+        tar \
+    && apt-get autoremove -y \
+    && apt-get autoclean \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/* \
+    && rm -rf /tmp/* \
+    && rm -rf /var/tmp/*
 
-USER mongodb
+# Create entrypoint script that handles permissions like Bitnami
+COPY entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh
+
+# Set environment variables for compatibility with Bitnami-style charts
+ENV MONGODB_DATA_DIR="/data/db"
+ENV MONGODB_DAEMON_USER="mongodb"
+ENV MONGODB_DAEMON_GROUP="mongodb"
+ENV MONGODB_VOLUME_DIR="/data"
+ENV MONGODB_LOG_DIR="/data/logs"
+ENV MONGODB_TMP_DIR="/data/tmp"
+
+# Configure MongoDB to listen on all interfaces (required for Kubernetes)
+ENV MONGODB_EXTRA_FLAGS="--bind_ip_all"
+
+# Create directories with proper structure
+RUN mkdir -p /data/db /data/logs /data/tmp && \
+    chown -R 1001:1001 /data && \
+    chmod -R 755 /data
+
+# Switch to mongodb user (UID 1001 to match Bitnami chart)
+USER 1001
 
 # Healthcheck
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
   CMD mongosh --eval "db.adminCommand('ping')" || exit 1
 
 EXPOSE 27017
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 CMD ["mongod"]
