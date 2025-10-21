@@ -37,47 +37,23 @@ metadata:
     dockerfile='mongo-8.dockerfile'
   )
   print("Deploying MongoDB 8.0.15 for Testkube version: %s" % version)
-  yaml = helm('./helm', name='testkube-enterprise-mongodb', namespace='testkube-%s' % version.replace(".", "-"), set=[
-    'fullnameOverride=testkube-enterprise-mongodb',
-    'image.registry=null',
-    'image.repository=testkube/mongodb',
-    'image.tag=8.0.15',
-    'auth.enabled=false',
-    # Align chart with official mongo image expectations
-    'persistence.mountPath=/data/db',
-    # Disable volumePermissions init to avoid pulling unavailable image; rely on fsGroup
-    'volumePermissions.enabled=false',
-    # Align security context with upstream mongo image user/group (commonly 999)
-    'containerSecurityContext.runAsUser=999',
-    'podSecurityContext.fsGroup=999',
-    # Replace Bitnami script-based probes (not present in our image) with TCP socket probes
-    'livenessProbe.enabled=false',
-    'readinessProbe.enabled=false',
-    'customLivenessProbe.tcpSocket.port=27017',
-    'customLivenessProbe.initialDelaySeconds=30',
-    'customLivenessProbe.periodSeconds=20',
-    'customLivenessProbe.timeoutSeconds=10',
-    'customReadinessProbe.tcpSocket.port=27017',
-    'customReadinessProbe.initialDelaySeconds=5',
-    'customReadinessProbe.periodSeconds=10',
-    'customReadinessProbe.timeoutSeconds=5',
-  ])
+  yaml = helm('./helm', name='testkube-enterprise-mongodb', namespace='testkube-%s' % version.replace(".", "-"), values='./mongo.values.yaml')
   k8s_yaml(yaml)
-  # print("Deploying Testkube version: %s" % version)
-  # yaml = helm('../charts/tke-%s/testkube-enterprise' % version, name='testkube', namespace='testkube-%s' % version.replace(".", "-"), values='./values.demo.yaml')
-  # k8s_yaml(yaml)
-  # # TODO: this grouping does not work with multiple versions
-  # print("Setting up port forwards and resources for Testkube version: %s" % version)
-  # k8s_resource(workload='testkube-enterprise-ui', port_forwards=8080, labels='testkube-enterprise')
-  # k8s_resource(workload='testkube-enterprise-api', port_forwards=8090, labels='testkube-enterprise')
-  # k8s_resource(workload='testkube-enterprise-dex', port_forwards=5556, labels='testkube-enterprise')
-  # k8s_resource(workload='testkube-enterprise-minio', port_forwards=9000, labels='testkube-enterprise')
-  # k8s_resource(workload='testkube-enterprise-mongodb', labels='testkube-enterprise')
-  # k8s_resource(workload='testkube-enterprise-worker-service', labels='testkube-enterprise')
-  # k8s_resource(workload='testkube-enterprise-nats', labels='testkube-enterprise')
-  # k8s_resource(workload='testkube-api-server', labels='testkube-agent')
-  # k8s_resource(workload='testkube-nats', labels='testkube-agent')
-  # print("Deployed Testkube version: %s" % version)
+  print("Deploying Testkube version: %s" % version)
+  yaml = helm('../charts/tke-%s/testkube-enterprise' % version, name='testkube', namespace='testkube-%s' % version.replace(".", "-"), values='./values.demo.yaml')
+  k8s_yaml(yaml)
+  # TODO: this grouping does not work with multiple versions
+  print("Setting up port forwards and resources for Testkube version: %s" % version)
+  k8s_resource(workload='testkube-enterprise-ui', port_forwards=8080, labels='testkube-enterprise')
+  k8s_resource(workload='testkube-enterprise-api', port_forwards=8090, labels='testkube-enterprise')
+  k8s_resource(workload='testkube-enterprise-dex', port_forwards=5556, labels='testkube-enterprise')
+  k8s_resource(workload='testkube-enterprise-minio', port_forwards=9000, labels='testkube-enterprise')
+  k8s_resource(workload='testkube-enterprise-mongodb', labels='testkube-enterprise')
+  k8s_resource(workload='testkube-enterprise-worker-service', labels='testkube-enterprise')
+  k8s_resource(workload='testkube-enterprise-nats', labels='testkube-enterprise')
+  k8s_resource(workload='testkube-api-server', labels='testkube-agent')
+  k8s_resource(workload='testkube-nats', labels='testkube-agent')
+  print("Deployed Testkube version: %s" % version)
 
 # TODO: find a way to make grouping work with multiple versions or testkube
 [deploy_testkube_instances(version) for version in version_list()]

@@ -44,6 +44,8 @@ Steps used to test:
       enabled: false
    ```
 
+   Copy from the Testkube Enterprise helm chart, from the file `values.yaml`, 2 main properties: `global` and `mongodb` into a new file `mongo.values.yaml`.
+
 3. Start tilt to deploy local MongoDB image and chart with each selected Testkube version:
 
    ```bash
