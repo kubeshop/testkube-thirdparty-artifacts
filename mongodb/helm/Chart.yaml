@@ -12,6 +12,10 @@ annotations:
   licenses: Apache-2.0
 apiVersion: v2
 appVersion: 8.0.15
+dependencies:
+- name: common
+  version: 2.26.0
+  repository: "file://../../common"
 description: Testkube helm chart to deploy MongoDB instance needed to store all states of Testkube platform and components.
 maintainers:
 - name: Testkube
