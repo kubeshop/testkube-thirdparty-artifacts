@@ -42,8 +42,10 @@ Steps used to test:
 3. Deploy and test:
 
    ```bash
-   helm upgrade --install testkube ./[version_to_be_tested]/testkube-enterprise/ --namespace testkube-[version_to_be_tested] --create-namespace -f values.demo.yaml
+   tilt up
    ```
+
+   Navigate to <http://localhost:8080> and run Testkube regression test.
 
 ### Testkube OSS
 
