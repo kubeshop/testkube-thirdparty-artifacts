@@ -1079,7 +1079,7 @@ persistence:
   storageClass: ""
   ## @param persistence.mountPath Data volume mount path
   ##
-  mountPath: /bitnami/minio/data
+  mountPath: /home/minio-user/data
   ## @param persistence.accessModes PVC Access Modes for MinIO&reg; data volume
   ##
   accessModes:

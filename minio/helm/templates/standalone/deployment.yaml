@@ -113,6 +113,8 @@ spec:
           args: {{- include "common.tplvalues.render" (dict "value" .Values.args "context" $) | nindent 12 }}
           {{- end }}
           env:
+            - name: DEBUG
+              value: {{ ternary "true" "false" .Values.image.debug | quote }}
             - name: MINIO_SCHEME
               value: {{ ternary "https" "http" .Values.tls.enabled | quote }}
             - name: MINIO_FORCE_NEW_KEYS
@@ -121,9 +123,9 @@ spec:
               value: {{ .Values.containerPorts.api | quote }}
             {{- if .Values.auth.useCredentialsFiles }}
             - name: MINIO_ROOT_USER_FILE
-              value: "/opt/bitnami/minio/secrets/root-user"
+              value: "/home/minio-user/secrets/root-user"
             - name: MINIO_ROOT_PASSWORD_FILE
-              value: "/opt/bitnami/minio/secrets/root-password"
+              value: "/home/minio-user/secrets/root-password"
             {{- else }}
             - name: MINIO_ROOT_USER
               valueFrom:
@@ -224,14 +226,14 @@ spec:
               mountPath: /tmp
               subPath: tmp-dir
             - name: empty-dir
-              mountPath: /opt/bitnami/minio/tmp
+              mountPath: /home/minio-user/tmp
               subPath: app-tmp-dir
             - name: empty-dir
               mountPath: /.mc
               subPath: app-mc-dir
             {{- if and .Values.auth.useSecret .Values.auth.useCredentialsFiles }}
             - name: minio-credentials
-              mountPath: /opt/bitnami/minio/secrets/
+              mountPath: /home/minio-user/secrets/
             {{- end }}
             - name: data
               mountPath: {{ .Values.persistence.mountPath }}

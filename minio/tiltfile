@@ -21,12 +21,13 @@ metadata:
   docker_build(
     'testkube/minio:latest',
     context='.',
-    dockerfile='minio-hotfix.dockerfile'
+    dockerfile='minio-release.dockerfile'
   )
   print("Deploying Minio for Testkube version: %s" % version)
   yaml = helm('./helm', name='testkube-enterprise-minio', namespace='testkube-%s' % version.replace(".", "-"), values='./minio.values.yaml')
   k8s_yaml(yaml)
   print("Deploying Testkube version: %s" % version)
+
   yaml = helm('../charts/tke-%s/testkube-enterprise' % version, name='testkube', namespace='testkube-%s' % version.replace(".", "-"), values='./values.demo.yaml')
   k8s_yaml(yaml)
   # TODO: this grouping does not work with multiple versions
