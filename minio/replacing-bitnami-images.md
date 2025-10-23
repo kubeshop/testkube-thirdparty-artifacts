@@ -1,13 +1,6 @@
 # Replacing Minio image and helm chart
 
-## Using official image and helm chart
-
-Artifacts to test:
-
-* Official image: https://hub.docker.com/r/minio/minio
-* Official helm chart: https://github.com/minio/operator/tree/master/helm
-
-### Testkube Enterprise
+## Testkube Enterprise
 
 Versions tested:
 
@@ -19,35 +12,48 @@ Steps used to test:
 1. Pull latest published Testkube Enteprise helm chart:
 
    ```bash
-   for version in 2.325.0 2.324.9; do
-   helm pull oci://us-east1-docker.pkg.dev/testkube-cloud-372110/testkube/testkube-enterprise --version $version --untar -d charts/tke-$version
-   done
+   export VERSION="2.324.9"
+   helm pull oci://us-east1-docker.pkg.dev/testkube-cloud-372110/testkube/testkube-enterprise --version $VERSION --untar -d charts/tke-$VERSION
    ```
 
 2. Prepare `values.demo.yaml` [file](https://github.com/kubeshop/testkube-cloud-api/blob/main/helm/values.demo.yaml) with Minio image version:
 
    ```bash
-   curl https://raw.githubusercontent.com/kubeshop/testkube-cloud-api/refs/heads/main/helm/values.demo.yaml?token=[YOUR_TOKEN] -o values.demo.yaml
+   curl https://raw.githubusercontent.com/kubeshop/testkube-cloud-api/refs/heads/main/helm/values.demo.yaml?token=[YOUR_TOKEN] -o minio/values.demo.yaml
    ```
 
-   Lines to change into the `values.demo.yaml`:
+   Lines to change into the `minio/values.demo.yaml`:
 
    ```yaml
     minio:
       enabled: false
    ```
 
-   Copy from the Testkube Enterprise helm chart, from the file `values.yaml`, 2 main properties: `global` and `minio` into a new file `minio.values.yaml`.
+   Copy from the Testkube Enterprise helm chart, from the file `values.yaml`, 2 main properties: `global` (as global) and `minio` (in the root) into a new file `minio.values.yaml`. Finally ensure property `image` is like in this example:
+
+   ```yaml
+   global:
+     enterpriseMode: true
+     (...)
+   fullnameOverride: &minioFullnameOverride testkube-enterprise-minio
+   (...)
+   image:
+     registry: null
+     repository: testkube/minio
+     tag: latest
+   (...)
+   ```
 
 3. Deploy and test:
 
    ```bash
-   tilt up
+   cd minio
+   tilt up -f titl-enterprise
    ```
 
    Navigate to <http://localhost:8080> and run Testkube regression test.
 
-### Testkube OSS
+## Testkube OSS
 
 Versions tested:
 
