@@ -1,6 +1,6 @@
 # minio
 
-![Version: 2025.10.18-0](https://img.shields.io/badge/Version-2025.10.18--0-informational?style=flat-square) ![AppVersion: 2025.10.18](https://img.shields.io/badge/AppVersion-2025.10.18-informational?style=flat-square)
+![Version: 2025.10-0](https://img.shields.io/badge/Version-2025.10--0-informational?style=flat-square) ![AppVersion: 2025.10](https://img.shields.io/badge/AppVersion-2025.10-informational?style=flat-square)
 
 Testkube helm chart to deploy Minio instance needed to store artifacts generated on Testkube platform (based on Minio Bitnami helm chart).
 
@@ -55,7 +55,7 @@ Testkube helm chart to deploy Minio instance needed to store artifacts generated
 | clientImage.digest | string | `""` |  |
 | clientImage.registry | string | `"us-east1-docker.pkg.dev"` |  |
 | clientImage.repository | string | `"testkube-cloud-372110/testkube/minio"` |  |
-| clientImage.tag | string | `"2025.10.18"` |  |
+| clientImage.tag | float | `2025.1` |  |
 | clusterDomain | string | `"cluster.local"` |  |
 | command | list | `[]` |  |
 | commonAnnotations | object | `{}` |  |
@@ -100,7 +100,7 @@ Testkube helm chart to deploy Minio instance needed to store artifacts generated
 | image.pullSecrets | list | `[]` |  |
 | image.registry | string | `"us-east1-docker.pkg.dev"` |  |
 | image.repository | string | `"testkube-cloud-372110/testkube/minio"` |  |
-| image.tag | string | `"2025.10.18"` |  |
+| image.tag | float | `2025.1` |  |
 | ingress.annotations | object | `{}` |  |
 | ingress.apiVersion | string | `""` |  |
 | ingress.enabled | bool | `false` |  |
@@ -166,7 +166,7 @@ Testkube helm chart to deploy Minio instance needed to store artifacts generated
 | persistence.annotations | object | `{}` |  |
 | persistence.enabled | bool | `true` |  |
 | persistence.existingClaim | string | `""` |  |
-| persistence.mountPath | string | `"/bitnami/minio/data"` |  |
+| persistence.mountPath | string | `"/home/minio-user/data"` |  |
 | persistence.selector | object | `{}` |  |
 | persistence.size | string | `"8Gi"` |  |
 | persistence.storageClass | string | `""` |  |

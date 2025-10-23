@@ -1,5 +1,10 @@
-# Use a lightweight Alpine Linux base image
-FROM alpine:3.22
+# Use a lightweight Debian minimal image
+FROM debian:bullseye-slim
+
+ARG TARGETARCH
+
+ENV HOME="/" \
+    OS_ARCH="${TARGETARCH:-amd64}"
 
 # Metadata
 LABEL maintainer="Testkube Team" \
@@ -7,32 +12,30 @@ LABEL maintainer="Testkube Team" \
       description="Minio 2025 - Testkube Edition"
 
 # Install required packages
-RUN apk update --no-cache && \
-    apk add --no-cache \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
-    curl \
     jq \
     procps \
     bash && \
-    apk cache clean
+    rm -rf /var/lib/apt/lists/*
 
 # Use bash shell with strict error handling
 SHELL ["/bin/bash", "-o", "errexit", "-o", "nounset", "-o", "pipefail", "-c"]
 
 # TODO: replace with our own wait-for-port if needed
 # Install Bitnami wait-for-port utility.
-RUN curl -o /usr/local/bin/wait-for-port https://github.com/bitnami/wait-for-port/releases/download/v1.0.10/wait-for-port-linux-amd64.tar.gz \
+RUN curl -o /usr/local/bin/wait-for-port https://github.com/bitnami/wait-for-port/releases/download/v1.0.10/wait-for-port-linux-${OS_ARCH}.tar.gz \
 && chmod +x /usr/local/bin/wait-for-port
 
 # Create a non-root user for security
-RUN addgroup -S minio-group && adduser -S -G minio-group minio-user
+RUN groupadd -r minio-group && useradd -r -g minio-group minio-user
 
 # Download the Minio Client binary and make it executable
-RUN curl -o /usr/local/bin/mc https://dl.min.io/community/client/mc/release/linux-arm64/mc && \
+RUN curl -o /usr/local/bin/mc https://dl.min.io/community/client/mc/release/linux-${OS_ARCH}/mc && \
     chmod +x /usr/local/bin/mc
 
 # Download the Minio binary and make it executable
-RUN curl -o /usr/local/bin/minio https://dl.min.io/community/server/minio/release/linux-arm64/minio && \
+RUN curl -o /usr/local/bin/minio https://dl.min.io/community/server/minio/release/linux-${OS_ARCH}/minio && \
     chmod +x /usr/local/bin/minio
 
 # Create a data directory and set permissions
@@ -57,13 +60,14 @@ ENV APP_VERSION=2025-10-18.hotfix \
     APP_NAME=minio
 
 # Volumes for data persistence and certificates
-VOLUME [ "/bitnami/minio/data", "/certs" ]
+VOLUME [ "/home/minio-user/data", "/certs" ]
 
 # Expose the Minio API and Console ports
 EXPOSE 9000 9001
 
 # Set the user to run the container
 USER minio-user
+WORKDIR /home/minio-user
 
 # Set the entrypoint to run Minio server
 ENTRYPOINT ["/home/minio-user/scripts/entrypoint.sh"]
