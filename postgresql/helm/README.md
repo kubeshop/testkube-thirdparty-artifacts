@@ -1,7 +1,7 @@
 # PostgreSQL 18.0.0 - Testkube
 
 ## Overview
-Image uses `18.0.0` Application version and resides in `us-east1-docker.pkg.dev/testkube-cloud-372110/testkube` repo. Full image path: `us-east1-docker.pkg.dev/testkube-cloud-372110/testkube/testkube-postgresql:18-debian-12`.
+Image uses `18.0.0` Application version and resides in `us-east1-docker.pkg.dev` repo. Full image path: `us-east1-docker.pkg.dev/testkube-cloud-372110/testkube/testkube-postgresql:18-debian-12`.
 This is an official PostgreSQL image which was rebuilt and pushed to `testkube` Google Artifact Registry. Link to the original Dockerfile: https://github.com/bitnami/containers/blob/main/bitnami/postgresql/18/debian-12/Dockerfile
 
 ## Key Features
@@ -16,8 +16,8 @@ This is an official PostgreSQL image which was rebuilt and pushed to `testkube` 
 ```yaml
 postgresql:
   image:
-    registry: us-east1-docker.pkg.dev/testkube-cloud-372110
-    repository: testkube/testkube-postgresql
+    registry: us-east1-docker.pkg.dev
+    repository: testkube-cloud-372110/testkube/testkube-postgresql
     tag: 18-debian-12
 ```
 

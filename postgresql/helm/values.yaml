@@ -113,8 +113,8 @@ diagnosticMode:
 ## @param image.debug Specify if debug values should be set
 ##
 image:
-  registry: us-east1-docker.pkg.dev/testkube-cloud-372110
-  repository: testkube/testkube-postgresql
+  registry: us-east1-docker.pkg.dev
+  repository: testkube-cloud-372110/testkube/testkube-postgresql
   tag: 18-debian-12
   digest: ""
   ## Specify a imagePullPolicy
