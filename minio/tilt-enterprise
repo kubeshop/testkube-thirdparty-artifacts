@@ -1,0 +1,48 @@
+def enterprise_version_list():
+  """
+  Returns a list of Testkube versions pulled to local folder.
+  """
+  charts_list = local('ls -A ../charts | grep -i "325" | tr -d "tke-"')
+  return str(charts_list).strip().split("\n")
+
+def deploy_testkube_enterprise_instances(version):
+  """
+  Deploys the Testkube and MongoDB instance using Helm charts into this folder.
+  """
+  testkube_namespace = """
+kind: Namespace
+apiVersion: v1
+metadata:
+  name: testkube-enterprise
+  """
+  print("Creating namespace: %s" % testkube_namespace)
+  k8s_yaml([blob(testkube_namespace)])
+  print("Building Minio latest docker image for Testkube version: %s" % version)
+  docker_build(
+    'testkube/minio:latest',
+    context='.',
+    dockerfile='minio-release.dockerfile'
+  )
+  print("Deploying Minio for Testkube version: %s" % version)
+  yaml = helm('./helm', name='testkube-enterprise-minio', namespace='testkube-enterprise', values='./minio.values.yaml')
+  k8s_yaml(yaml)
+  print("Deploying Testkube version: %s" % version)
+
+  yaml = helm('../charts/tke-%s/testkube-enterprise' % version, name='testkube', namespace='testkube-enterprise', values='./values.demo.yaml')
+  k8s_yaml(yaml)
+  # TODO: this grouping does not work with multiple versions
+  print("Setting up port forwards and resources for Testkube version: %s" % version)
+  k8s_resource(workload='testkube-enterprise-ui', port_forwards=8080, labels='testkube-enterprise')
+  k8s_resource(workload='testkube-enterprise-api', port_forwards=8090, labels='testkube-enterprise')
+  k8s_resource(workload='testkube-enterprise-dex', port_forwards=5556, labels='testkube-enterprise')
+  k8s_resource(workload='testkube-enterprise-minio', port_forwards=9000, labels='testkube-enterprise')
+  k8s_resource(workload='testkube-enterprise-mongodb', labels='testkube-enterprise')
+  k8s_resource(workload='testkube-enterprise-worker-service', labels='testkube-enterprise')
+  k8s_resource(workload='testkube-enterprise-nats', labels='testkube-enterprise')
+  k8s_resource(workload='testkube-api-server', labels='testkube-agent')
+  k8s_resource(workload='testkube-nats', labels='testkube-agent')
+  print("Deployed Testkube version: %s" % version)
+
+# TODO: find a way to make grouping work with multiple versions or testkube
+[deploy_testkube_enterprise_instances(version) for version in enterprise_version_list()]
+

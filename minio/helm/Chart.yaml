@@ -1,0 +1,28 @@
+annotations:
+  category: Infrastructure
+  images: |
+    - name: minio
+      image: us-east1-docker.pkg.dev/testkube-cloud-372110/testkube/minio:2025.10
+  licenses: Apache-2.0
+apiVersion: v2
+appVersion: "2025.10"
+dependencies:
+- name: common
+  version: 2.26.0
+  repository: "file://../../common"
+description: Testkube helm chart to deploy Minio instance needed to store artifacts generated on Testkube platform (based on Minio Bitnami helm chart).
+keywords:
+- minio
+- storage
+- object-storage
+- s3
+- cluster
+maintainers:
+- name: Testkube
+  email: support@testkube.io
+  url: https://github.com/kubeshop/testkube-thirdparty-artifacts
+name: minio
+sources:
+- https://github.com/kubeshop/testkube-thirdparty-artifacts/tree/main/minio
+- https://min.io
+version: 2025.10-0
