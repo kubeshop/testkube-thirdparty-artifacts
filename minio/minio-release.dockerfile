@@ -1,20 +1,58 @@
 # Use a lightweight Debian minimal image
-FROM debian:bullseye-slim
+FROM golang:1.25.3-alpine3.22 AS build
+
+# Build arguments
+ARG TARGETOS
+ARG TARGETARCH
+ARG GOMODCACHE="/root/.cache/go-build"
+ARG GOCACHE="/go/pkg"
+ARG MINIO_SERVER_VERSION=RELEASE.2025-10-15T17-29-55Z
+ARG MINIO_CLIENT_VERSION=RELEASE.2025-08-13T08-35-41Z
+
+# Set working directory
+WORKDIR /build
+
+# Update and install required packages: git, bash, perl, and make
+RUN apk update && apk add --no-cache git make bash perl
+
+# Git clone Minio server source code
+RUN git clone --depth 1 --branch "${MINIO_SERVER_VERSION}" https://github.com/minio/minio
+
+# Build Minio server binary
+RUN cd minio && \
+    GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
+    GOMODCACHE=${GOMODCACHE} GOCACHE=${GOCACHE} \
+    make build && cd ..
+
+# Git clone Minio Client source code
+RUN git clone --depth 1 --branch "${MINIO_CLIENT_VERSION}" https://github.com/minio/mc
+
+# Build Minio Client binary
+RUN cd mc && \
+    GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
+    GOMODCACHE=${GOMODCACHE} GOCACHE=${GOCACHE} \
+    make build
+
+FROM debian:bookworm-slim
 
 ARG TARGETARCH
 
 ENV HOME="/" \
-    OS_ARCH="${TARGETARCH:-amd64}"
+    OS_ARCH="${TARGETARCH:-amd64}" \
+    MINIO_SERVER_VERSION=RELEASE.2025-10-15T17-29-55Z \
+    MINIO_CLIENT_VERSION=RELEASE.2025-08-13T08-35-41Z \
+    APP_NAME=minio
 
 # Metadata
 LABEL maintainer="Testkube Team" \
-      version="2025-testkube" \
-      description="Minio 2025 - Testkube Edition"
+      version="2025.10" \
+      description="Minio Server - Testkube Edition"
 
 # Install required packages
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     jq \
+    curl \
     procps \
     bash && \
     rm -rf /var/lib/apt/lists/*
@@ -30,13 +68,13 @@ RUN curl -o /usr/local/bin/wait-for-port https://github.com/bitnami/wait-for-por
 # Create a non-root user for security
 RUN groupadd -r minio-group && useradd -r -g minio-group minio-user
 
-# Download the Minio Client binary and make it executable
-RUN curl -o /usr/local/bin/mc https://dl.min.io/community/client/mc/release/linux-${OS_ARCH}/mc && \
-    chmod +x /usr/local/bin/mc
+# Copy Minio Client binary from build stage and set permissions
+COPY --from=build /build/minio/mc /usr/local/bin/mc
+RUN chmod +x /usr/local/bin/mc
 
-# Download the Minio binary and make it executable
-RUN curl -o /usr/local/bin/minio https://dl.min.io/community/server/minio/release/linux-${OS_ARCH}/minio && \
-    chmod +x /usr/local/bin/minio
+# Copy Minio Server binary from build stage and set permissions
+COPY --from=build /build/minio/minio /usr/local/bin/minio
+RUN chmod +x /usr/local/bin/minio
 
 # Create a data directory and set permissions
 RUN mkdir -p /home/minio-user/data && \
@@ -54,10 +92,6 @@ COPY --chown=minio-user:minio-group scripts /home/minio-user/scripts
 
 # Post unpacking scripts
 RUN chmod -R +x /home/minio-user/scripts/ && /home/minio-user/scripts/postunpack.sh
-
-# Environment variables for Minio configuration
-ENV APP_VERSION=2025-10-18.hotfix \
-    APP_NAME=minio
 
 # Volumes for data persistence and certificates
 VOLUME [ "/home/minio-user/data", "/certs" ]
