@@ -70,7 +70,7 @@ RUN curl -o /usr/local/bin/wait-for-port https://github.com/bitnami/wait-for-por
 RUN groupadd -r minio-group && useradd -r -g minio-group minio-user
 
 # Copy Minio Client binary from build stage and set permissions
-COPY --from=build /build/minio/mc /usr/local/bin/mc
+COPY --from=build /build/mc/mc /usr/local/bin/mc
 RUN chmod +x /usr/local/bin/mc
 
 # Copy Minio Server binary from build stage and set permissions
