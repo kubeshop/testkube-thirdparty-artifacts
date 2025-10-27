@@ -1,6 +1,18 @@
-# Replacing Minio image and helm chart
+# Replacing MongoDB image and helm chart
 
-## Testkube Enterprise
+Techs used to test:
+
+* Kubernetes Kind.
+* Tilt.
+
+## Using official image and helm chart
+
+Artifacts to test:
+
+* Official image: <https://hub.docker.com/_/mongo>
+* Official helm chart: discarded for now, as the community helm chart is based on operators, so we'll reuse Bitnami to create our own.
+
+### Testkube Enterprise
 
 Versions tested:
 
@@ -11,49 +23,43 @@ Steps used to test:
 
 1. Pull latest published Testkube Enteprise helm chart:
 
+   > I removed the version 2.324.9 from the for as the tiltfile is still not able to group multiple versions.
+
    ```bash
-   export VERSION="2.324.9"
-   helm pull oci://us-east1-docker.pkg.dev/testkube-cloud-372110/testkube/testkube-enterprise --version $VERSION --untar -d charts/tke-$VERSION
+   for version in 2.325.0; do
+   helm pull oci://us-east1-docker.pkg.dev/testkube-cloud-372110/testkube/testkube-enterprise --version $version --untar -d charts/tke-$version
+   done
    ```
 
 2. Prepare `values.demo.yaml` [file](https://github.com/kubeshop/testkube-cloud-api/blob/main/helm/values.demo.yaml) with Minio image version:
 
    ```bash
-   curl https://raw.githubusercontent.com/kubeshop/testkube-cloud-api/refs/heads/main/helm/values.demo.yaml?token=[YOUR_TOKEN] -o minio/values.demo.yaml
+   curl https://raw.githubusercontent.com/kubeshop/testkube-cloud-api/refs/heads/main/helm/values.demo.yaml?token=[YOUR_TOKEN] -o values.demo.yaml
    ```
 
-   Lines to change into the `minio/values.demo.yaml`:
+   Lines to change into the `values.demo.yaml`:
 
    ```yaml
-    minio:
+    mongo:
       enabled: false
    ```
 
-   Copy from the Testkube Enterprise helm chart, from the file `values.yaml`, 2 main properties: `global` (as global) and `minio` (in the root) into a new file `minio.values.yaml`. Finally ensure property `image` is like in this example:
+   Copy from the Testkube Enterprise helm chart, from the file `values.yaml`, 2 main properties: `global` and `mongodb` into a new file `mongo.values.yaml`.
 
-   ```yaml
-   global:
-     enterpriseMode: true
-     (...)
-   fullnameOverride: &minioFullnameOverride testkube-enterprise-minio
-   (...)
-   image:
-     registry: null
-     repository: testkube/minio
-     tag: latest
-   (...)
-   ```
-
-3. Deploy and test:
+3. Start tilt to deploy local MongoDB image and chart with each selected Testkube version:
 
    ```bash
-   cd minio
-   tilt up -f titl-enterprise
+   tilt up
    ```
 
-   Navigate to <http://localhost:8080> and run Testkube regression test.
+To clean up run the following commands:
 
-## Testkube OSS
+```bash
+tilt down
+tilt docker-prune
+```
+
+### Testkube OSS
 
 Versions tested:
 
