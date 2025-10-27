@@ -54,7 +54,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     jq \
     curl \
     procps \
-    bash && \
+    bash  \
+    curl && \
     rm -rf /var/lib/apt/lists/*
 
 # Use bash shell with strict error handling
@@ -79,6 +80,10 @@ RUN chmod +x /usr/local/bin/minio
 # Create a data directory and set permissions
 RUN mkdir -p /home/minio-user/data && \
     chown -R minio-user:minio-group /home/minio-user/data
+
+# Create a tmp directory and chown it so PID process can be created without requiring root
+RUN mkdir -p /home/minio-user/minio/tmp && \
+    chown -R minio-user:minio-group /home/minio-user
 
 # Create a directory for Minio client configuration
 RUN mkdir -p /home/minio-user/.mc && \
