@@ -14,10 +14,8 @@ description: Testkube helm chart to deploy Postgresql instance.
 home: https://testkube.io
 dependencies:
   - name: common
-    repository: oci://registry-1.docker.io/bitnamicharts
-    tags:
-      - bitnami-common
-    version: 2.x.x
+    version: 2.26.0
+    repository: "file://../../common"
 maintainers:
 - name: Testkube
   url: https://github.com/kubeshop/testkube-thirdparty-artifacts
