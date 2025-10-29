@@ -57,9 +57,9 @@ jobs:
         with:
           files: |
             ./docker-bake.hcl
-            ${{ steps.minio-meta.outputs.bake-file }}
+            ${{ steps.minio.outputs.bake-file }}
           set: |
-            minio.args.VERSION=${{ fromJSON(steps.cloud-api-meta.outputs.json).labels['org.opencontainers.image.version'] }}
+            minio.args.VERSION=${{ fromJSON(steps.minio.outputs.json).labels['org.opencontainers.image.version'] }}
           # Only tags are pushed, pushes to branches test whether app can be built.
           push: true
           save: true
