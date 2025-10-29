@@ -55,6 +55,7 @@ jobs:
       - name: Build image
         uses: depot/bake-action@v1.12.1
         with:
+          project: ${{ secrets.DEPOT_PROJECT_ID }}
           files: |
             ./docker-bake.hcl
             ${{ steps.minio.outputs.bake-file }}
