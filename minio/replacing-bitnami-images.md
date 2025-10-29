@@ -53,6 +53,12 @@ Steps used to test:
 
    Navigate to <http://localhost:8080> and run Testkube regression test.
 
+To test Minio in cluster change in the `minio.values.yaml` the property:
+
+```yaml
+mode: distributed # By default is: standalone
+```
+
 ## Testkube OSS
 
 Versions tested:
