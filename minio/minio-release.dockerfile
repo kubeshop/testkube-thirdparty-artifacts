@@ -54,17 +54,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     jq \
     curl \
     procps \
-    bash  \
-    curl && \
-    rm -rf /var/lib/apt/lists/*
+    bash \
+  && rm -rf /var/lib/apt/lists/*
 
 # Use bash shell with strict error handling
 SHELL ["/bin/bash", "-o", "errexit", "-o", "nounset", "-o", "pipefail", "-c"]
 
 # TODO: replace with our own wait-for-port if needed
 # Install Bitnami wait-for-port utility.
-RUN curl -o /usr/local/bin/wait-for-port https://github.com/bitnami/wait-for-port/releases/download/v1.0.10/wait-for-port-linux-${OS_ARCH}.tar.gz \
-&& chmod +x /usr/local/bin/wait-for-port
+RUN curl -fsSL "https://github.com/bitnami/wait-for-port/releases/download/v1.0.10/wait-for-port-linux-${OS_ARCH}.tar.gz" -o /tmp/wait-for-port.tar.gz \
+  && tar -xzf /tmp/wait-for-port.tar.gz -C /tmp \
+  && install -m 0755 "$(find /tmp -maxdepth 1 -type f -name 'wait-for-port*' | head -n1)" /usr/local/bin/wait-for-port \
+  && find /tmp -maxdepth 1 -type f -name 'wait-for-port*' -delete \
+  && rm -f /tmp/wait-for-port.tar.gz
 
 # Create a non-root user for security
 RUN groupadd -r minio-group && useradd -r -g minio-group minio-user
