@@ -1,5 +1,10 @@
 # Replacing MongoDB image and helm chart
 
+Techs used to test:
+
+* Kubernetes Kind.
+* Tilt.
+
 ## Using official image and helm chart
 
 Artifacts to test:
@@ -18,8 +23,10 @@ Steps used to test:
 
 1. Pull latest published Testkube Enteprise helm chart:
 
+   > I removed the version 2.324.9 from the for as the tiltfile is still not able to group multiple versions.
+
    ```bash
-   for version in 2.325.0 2.324.9; do
+   for version in 2.325.0; do
    helm pull oci://us-east1-docker.pkg.dev/testkube-cloud-372110/testkube/testkube-enterprise --version $version --untar -d charts/tke-$version
    done
    ```
@@ -37,11 +44,20 @@ Steps used to test:
       enabled: false
    ```
 
+   Copy from the Testkube Enterprise helm chart, from the file `values.yaml`, 2 main properties: `global` and `mongodb` into a new file `mongo.values.yaml`.
+
 3. Start tilt to deploy local MongoDB image and chart with each selected Testkube version:
 
    ```bash
    tilt up
    ```
+
+To clean up run the following commands:
+
+```bash
+tilt down
+tilt docker-prune
+```
 
 ### Testkube OSS
 

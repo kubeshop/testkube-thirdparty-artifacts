@@ -138,7 +138,7 @@ diagnosticMode:
 ##
 image:
   registry: us-east1-docker.pkg.dev
-  repository: testkube-cloud-372110/testkube/mongodb:8.0.15
+  repository: testkube-cloud-372110/testkube/mongodb
   tag: 8.0.15
   digest: ""
   ## Specify a imagePullPolicy
