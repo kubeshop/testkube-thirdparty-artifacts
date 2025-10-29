@@ -1,4 +1,6 @@
 # based on Bitnami Common helm chart
+# Copyright VMware, Inc.
+# SPDX-License-Identifier: APACHE-2.0
 
 ## It is required by CI/CD tools and processes.
 ## @skip exampleValue
