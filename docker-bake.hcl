@@ -1,5 +1,5 @@
-target "default" {
-  inherits = ["minio"]
+group "default" {
+  targets = [ "minio" ]
 }
 
 target "minio-meta" {}

@@ -1,9 +1,5 @@
-# Copyright Broadcom, Inc. All Rights Reserved.
-# SPDX-License-Identifier: APACHE-2.0
-
 annotations:
   category: Infrastructure
-  licenses: Apache-2.0
   images: |
     - name: minio
       image: us-east1-docker.pkg.dev/testkube-cloud-372110/testkube/minio:2025.10
