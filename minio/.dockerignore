@@ -1,5 +1,5 @@
 helm/
 .gitignore
 .tiltignore
-tiltfile
+tilt-*
 *.yaml
