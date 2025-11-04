@@ -1,0 +1,67 @@
+name: Build Images
+
+on:
+  workflow_dispatch:
+  push:
+    # branches-ignore:
+    #   - main
+    # tags:
+    #   - '[0-9].[0-9]+.[0-9]+'
+    #   - '[0-9].[0-9]+.[0-9]+-rc.[0-9]+'
+    #   - '[0-9].[0-9]+.[0-9]+-dev.[0-9]+'
+
+jobs:
+  build:
+    runs-on: depot-ubuntu-22.04
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      GAR_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID_PROD }}
+      GAR_LOCATION:   ${{ secrets.GAR_LOCATION }}
+      GAR_REPOSITORY: testkube
+    steps:
+      - uses: actions/checkout@v3
+      - uses: depot/setup-action@v1
+
+      # Authenticate to Google Cloud
+      - name: Auth to Google Cloud
+        # if: ${{ github.ref_type == 'tag' }}
+        uses: google-github-actions/auth@v2
+        with:
+          project_id: ${{ env.GAR_PROJECT_ID }}
+          credentials_json: ${{ secrets.GKE_SA_KEY_PROD }} #Key to SA in Testkube Prod project
+
+      - name: Configure Docker for GAR
+        # if: ${{ github.ref_type == 'tag' }}
+        run: gcloud auth configure-docker ${{ env.GAR_LOCATION }}-docker.pkg.dev -q
+
+      - name: Create Docker tags and metadata for Minio
+        id: minio
+        uses: docker/metadata-action@v5
+        with:
+          bake-target: 'minio'
+          images: |
+            ${{ env.GAR_LOCATION }}-docker.pkg.dev/${{ env.GAR_PROJECT_ID }}/${{ env.GAR_REPOSITORY }}/minio
+          tags: |
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+
+      - uses: benjlevesque/short-sha@v3.0
+        id: short-sha
+        with:
+          length: 7
+
+      - name: Build image
+        uses: depot/bake-action@v1.12.1
+        with:
+          project: ${{ secrets.DEPOT_PROJECT_ID }}
+          files: |
+            ./docker-bake.hcl
+            ${{ steps.minio.outputs.bake-file }}
+          set: |
+            minio.args.VERSION=${{ fromJSON(steps.minio.outputs.json).labels['org.opencontainers.image.version'] }}
+          # Only tags are pushed, pushes to branches test whether app can be built.
+          push: true
+          save: true
+          save-tag: ${{ steps.short-sha.outputs.sha }}

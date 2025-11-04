@@ -36,6 +36,15 @@ global:
   # -- Global PodDisruptionBudget
   podDisruptionBudget:
     enabled: false
+  # -- Global Tolerations
+  tolerations: []
+  # -- Global NodeSelector
+  nodeSelector: {}
+  # -- Global Pod Topology Spread Constraints
+  topologySpreadConstraints: []
+  # -- Global Affinity
+  affinity: {}
+
 ## @section Common parameters
 
 ## @param nameOverride String to partially override common.names.fullname template (will maintain the release name)
@@ -77,7 +86,7 @@ extraDeploy: []
 image:
   registry: us-east1-docker.pkg.dev
   repository: testkube-cloud-372110/testkube/minio
-  tag: 2025.10.18
+  tag: "2025.10"
   digest: ""
   ## Specify a imagePullPolicy
   ## ref: https://kubernetes.io/docs/concepts/containers/images/#pre-pulled-images
@@ -104,7 +113,7 @@ image:
 clientImage:
   registry: us-east1-docker.pkg.dev
   repository: testkube-cloud-372110/testkube/minio
-  tag: 2025.10.18
+  tag: "2025.10"
   digest: ""
 ## @param mode MinIO&reg; server mode (`standalone` or `distributed`)
 ## ref: https://docs.minio.io/docs/distributed-minio-quickstart-guide
@@ -1079,7 +1088,7 @@ persistence:
   storageClass: ""
   ## @param persistence.mountPath Data volume mount path
   ##
-  mountPath: /bitnami/minio/data
+  mountPath: /home/minio-user/data
   ## @param persistence.accessModes PVC Access Modes for MinIO&reg; data volume
   ##
   accessModes:
@@ -1116,9 +1125,9 @@ volumePermissions:
   ## @param volumePermissions.image.pullSecrets Specify docker-registry secret names as an array
   ##
   image:
-    registry: docker.io
-    repository: bitnami/os-shell
-    tag: 12-debian-12-r32
+    registry: us-east1-docker.pkg.dev
+    repository: testkube-cloud-372110/testkube/minio
+    tag: "2025.10"
     digest: ""
     pullPolicy: IfNotPresent
     ## Optionally specify an array of imagePullSecrets.

@@ -38,22 +38,26 @@ spec:
       schedulerName: {{ .Values.schedulerName }}
       {{- end }}
       serviceAccountName: {{ template "minio.serviceAccountName" . }}
-      {{- if .Values.affinity }}
-      affinity: {{- include "common.tplvalues.render" (dict "value" .Values.affinity "context" $) | nindent 8 }}
+      {{- $affinity := coalesce .Values.global.affinity .Values.affinity -}}
+      {{- if not (empty $affinity) }}
+      affinity: {{- include "common.tplvalues.render" (dict "value" $affinity "context" $) | nindent 8 }}
       {{- else }}
       affinity:
         podAffinity: {{- include "common.affinities.pods" (dict "type" .Values.podAffinityPreset "customLabels" $podLabels "context" $) | nindent 10 }}
         podAntiAffinity: {{- include "common.affinities.pods" (dict "type" .Values.podAntiAffinityPreset "customLabels" $podLabels "context" $) | nindent 10 }}
         nodeAffinity: {{- include "common.affinities.nodes" (dict "type" .Values.nodeAffinityPreset.type "key" .Values.nodeAffinityPreset.key "values" .Values.nodeAffinityPreset.values) | nindent 10 }}
       {{- end }}
-      {{- if .Values.nodeSelector }}
-      nodeSelector: {{- include "common.tplvalues.render" (dict "value" .Values.nodeSelector "context" $) | nindent 8 }}
+      {{- $nodeSelector := coalesce .Values.global.nodeSelector .Values.nodeSelector -}}
+      {{- if not (empty $nodeSelector) }}
+      nodeSelector: {{- include "common.tplvalues.render" (dict "value" $nodeSelector "context" $) | nindent 8 }}
       {{- end }}
-      {{- if .Values.tolerations }}
-      tolerations: {{- include "common.tplvalues.render" (dict "value" .Values.tolerations "context" $) | nindent 8 }}
+      {{- $tolerations := coalesce .Values.global.tolerations .Values.tolerations -}}
+      {{- if not (empty $tolerations) }}
+      tolerations: {{- include "common.tplvalues.render" (dict "value" $tolerations "context" $) | nindent 6 }}
       {{- end }}
-      {{- if .Values.topologySpreadConstraints }}
-      topologySpreadConstraints: {{- include "common.tplvalues.render" (dict "value" .Values.topologySpreadConstraints "context" $) | nindent 8 }}
+      {{- $topConstraints := coalesce .Values.global.topologySpreadConstraints .Values.topologySpreadConstraints -}}
+      {{- if not (empty $topConstraints) }}
+      topologySpreadConstraints: {{- include "common.tplvalues.render" (dict "value" $topConstraints "context" $) | nindent 8 }}
       {{- end }}
       {{- if .Values.priorityClassName }}
       priorityClassName: {{ .Values.priorityClassName | quote }}
@@ -113,6 +117,8 @@ spec:
           args: {{- include "common.tplvalues.render" (dict "value" .Values.args "context" $) | nindent 12 }}
           {{- end }}
           env:
+            - name: DEBUG
+              value: {{ ternary "true" "false" .Values.image.debug | quote }}
             - name: MINIO_SCHEME
               value: {{ ternary "https" "http" .Values.tls.enabled | quote }}
             - name: MINIO_FORCE_NEW_KEYS
@@ -121,9 +127,9 @@ spec:
               value: {{ .Values.containerPorts.api | quote }}
             {{- if .Values.auth.useCredentialsFiles }}
             - name: MINIO_ROOT_USER_FILE
-              value: "/opt/bitnami/minio/secrets/root-user"
+              value: "/home/minio-user/secrets/root-user"
             - name: MINIO_ROOT_PASSWORD_FILE
-              value: "/opt/bitnami/minio/secrets/root-password"
+              value: "/home/minio-user/secrets/root-password"
             {{- else }}
             - name: MINIO_ROOT_USER
               valueFrom:
@@ -224,14 +230,14 @@ spec:
               mountPath: /tmp
               subPath: tmp-dir
             - name: empty-dir
-              mountPath: /opt/bitnami/minio/tmp
+              mountPath: /home/minio-user/tmp
               subPath: app-tmp-dir
             - name: empty-dir
               mountPath: /.mc
               subPath: app-mc-dir
             {{- if and .Values.auth.useSecret .Values.auth.useCredentialsFiles }}
             - name: minio-credentials
-              mountPath: /opt/bitnami/minio/secrets/
+              mountPath: /home/minio-user/secrets/
             {{- end }}
             - name: data
               mountPath: {{ .Values.persistence.mountPath }}
