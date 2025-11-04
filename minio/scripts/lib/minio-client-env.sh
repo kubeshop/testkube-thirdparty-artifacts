@@ -59,7 +59,7 @@ MINIO_SERVER_ROOT_PASSWORD="${MINIO_SERVER_ROOT_PASSWORD:-"${MINIO_SERVER_SECRET
 export MINIO_SERVER_ROOT_PASSWORD="${MINIO_SERVER_ROOT_PASSWORD:-}"
 
 # System users (when running with a privileged user)
-export MINIO_DAEMON_USER="minio"
-export MINIO_DAEMON_GROUP="minio"
+export MINIO_DAEMON_USER="minio-user"
+export MINIO_DAEMON_GROUP="minio-group"
 
 # Custom environment variables may be defined below

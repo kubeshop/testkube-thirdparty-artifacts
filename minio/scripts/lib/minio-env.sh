@@ -59,8 +59,8 @@ export MINIO_PID_FILE="${MINIO_TMP_DIR}/minio.pid"
 export PATH="${MINIO_BIN_DIR}:${PATH}"
 
 # System users (when running with a privileged user)
-export MINIO_DAEMON_USER="minio"
-export MINIO_DAEMON_GROUP="minio"
+export MINIO_DAEMON_USER="minio-user"
+export MINIO_DAEMON_GROUP="minio-group"
 
 # MinIO configuration
 export MINIO_API_PORT_NUMBER="${MINIO_API_PORT_NUMBER:-9000}"

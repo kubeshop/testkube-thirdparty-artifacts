@@ -36,6 +36,15 @@ global:
   # -- Global PodDisruptionBudget
   podDisruptionBudget:
     enabled: false
+  # -- Global Tolerations
+  tolerations: []
+  # -- Global NodeSelector
+  nodeSelector: {}
+  # -- Global Pod Topology Spread Constraints
+  topologySpreadConstraints: []
+  # -- Global Affinity
+  affinity: {}
+
 ## @section Common parameters
 
 ## @param nameOverride String to partially override common.names.fullname template (will maintain the release name)

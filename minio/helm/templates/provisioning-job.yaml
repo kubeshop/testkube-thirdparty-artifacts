@@ -44,7 +44,7 @@ spec:
       serviceAccountName: {{ template "minio.serviceAccountName" . }}
       initContainers:
         - name: wait-for-available-minio
-          image: {{ include "minio.image" . }}
+          image: {{ include "minio.clientImage" . }}
           imagePullPolicy: {{ .Values.image.pullPolicy | quote }}
           {{- if .Values.provisioning.containerSecurityContext.enabled }}
           securityContext: {{- include "common.compatibility.renderSecurityContext" (dict "secContext" .Values.provisioning.containerSecurityContext "context" $) | nindent 12 }}
@@ -68,7 +68,7 @@ spec:
           {{- end }}
       containers:
         - name: minio
-          image: {{ include "minio.image" . }}
+          image: {{ include "minio.clientImage" . }}
           imagePullPolicy: {{ .Values.image.pullPolicy | quote }}
           {{- if .Values.provisioning.containerSecurityContext.enabled }}
           securityContext: {{- include "common.compatibility.renderSecurityContext" (dict "secContext" .Values.provisioning.containerSecurityContext "context" $) | nindent 12 }}
