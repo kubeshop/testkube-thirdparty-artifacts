@@ -20,7 +20,7 @@ Custom MongoDB image based on official `mongo:8.0.15` with recompiled database t
 1. **Recompiled MongoDB Database Tools** with updated Go dependencies:
    - `golang.org/x/crypto@v0.35.0`
    - Go 1.24 toolchain
-   
+
 2. **Updated Binaries**:
    - bsondump, mongodump, mongoexport, mongofiles
    - mongoimport, mongorestore, mongostat, mongotop
