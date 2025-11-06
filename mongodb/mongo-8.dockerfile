@@ -1,5 +1,7 @@
-# Stage 1: Build MongoDB tools with Go 1.24 and updated dependencies
-FROM golang:1.24 AS builder
+# Stage 1: Build MongoDB tools with Go 1.25 and updated dependencies
+FROM golang:1.25 AS builder
+
+ARG TOOLS_VERSION=100.13.0
 
 WORKDIR /build
 
@@ -7,7 +9,7 @@ WORKDIR /build
 RUN apt-get update && apt-get install -y git
 
 # Clone MongoDB database tools
-RUN git clone --depth 1 --branch 100.10.0 https://github.com/mongodb/mongo-tools.git
+RUN git clone --depth 1 --branch ${TOOLS_VERSION}  https://github.com/mongodb/mongo-tools.git
 
 WORKDIR /build/mongo-tools
 
@@ -26,69 +28,97 @@ RUN go build -mod=vendor -o /usr/local/bin/mongorestore ./mongorestore/main/mong
 RUN go build -mod=vendor -o /usr/local/bin/mongostat ./mongostat/main/mongostat.go
 RUN go build -mod=vendor -o /usr/local/bin/mongotop ./mongotop/main/mongotop.go
 
-# Stage 2: Final image based on official mongo:8.0.15
+# Stage 2: Template MongoDB configuration file
+FROM golang:1.25 AS template-builder
+
+RUN apt-get update && apt-get install -y git
+
+ARG GOMODCACHE="/root/.cache/go-build"
+ARG GOCACHE="/go/pkg"
+
+WORKDIR /src
+RUN git clone https://github.com/kubeshop/bitnami-render-template.git
+WORKDIR /src/bitnami-render-template
+RUN --mount=type=cache,target="$GOMODCACHE" \
+    --mount=type=cache,target="$GOCACHE" \
+    GOOS=$TARGETOS \
+    GOARCH=$TARGETARCH \
+    CGO_ENABLED=0 \
+    go build -o /opt/bitnami/common/bin/render-template *.go
+
+# Stage 3: Final image based on official MongoDB
 FROM mongo:8.0.15
 
-# Metadata
-LABEL maintainer="Testkube Team"
-LABEL version="8.0.15-testkube"
-LABEL description="MongoDB 8.0.15 - Testkube Edition - Recompiled binaries"
+ARG TARGETARCH
 
-USER root
+ENV HOME="/" \
+    OS_ARCH="${TARGETARCH:-amd64}" \
+    MONGO_SERVER_VERSION=8.0.15 \
+    APP_NAME=mongodb
 
-# Copy recompiled binaries with updated dependencies
-COPY --from=builder /usr/local/bin/bsondump /usr/bin/bsondump
-COPY --from=builder /usr/local/bin/mongodump /usr/bin/mongodump
-COPY --from=builder /usr/local/bin/mongoexport /usr/bin/mongoexport
-COPY --from=builder /usr/local/bin/mongofiles /usr/bin/mongofiles
-COPY --from=builder /usr/local/bin/mongoimport /usr/bin/mongoimport
-COPY --from=builder /usr/local/bin/mongorestore /usr/bin/mongorestore
-COPY --from=builder /usr/local/bin/mongostat /usr/bin/mongostat
-COPY --from=builder /usr/local/bin/mongotop /usr/bin/mongotop
+SHELL ["/bin/bash", "-o", "errexit", "-o", "nounset", "-o", "pipefail", "-c"]
 
 # Apply Ubuntu security patches and update vulnerable packages
 RUN apt-get update && \
     apt-get upgrade -y && \
-    # Install latest versions of packages with CVE issues to get patches
-    apt-get install -y --only-upgrade \
+    apt-get install -y --no-install-recommends \
         coreutils \
         libssl3t64 \
         openssl \
         tar \
+        yq \
+        ca-certificates \
+        curl \
+        numactl \
+        procps \
     && apt-get autoremove -y \
     && apt-get autoclean \
     && apt-get clean \
-    && rm -rf /var/lib/apt/lists/* \
-    && rm -rf /tmp/* \
-    && rm -rf /var/tmp/*
+    && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
-# Create entrypoint script that handles permissions like Bitnami
-COPY entrypoint.sh /usr/local/bin/entrypoint.sh
-RUN chmod +x /usr/local/bin/entrypoint.sh
+# TODO: replace with our own wait-for-port if needed
+# Install Bitnami wait-for-port utility.
+RUN curl -fsSL "https://github.com/bitnami/wait-for-port/releases/download/v1.0.10/wait-for-port-linux-${OS_ARCH}.tar.gz" -o /tmp/wait-for-port.tar.gz \
+  && tar -xzf /tmp/wait-for-port.tar.gz -C /tmp \
+  && install -m 0755 "$(find /tmp -maxdepth 1 -type f -name 'wait-for-port*' | head -n1)" /usr/local/bin/wait-for-port \
+  && find /tmp -maxdepth 1 -type f -name 'wait-for-port*' -delete \
+  && rm -f /tmp/wait-for-port.tar.gz
 
-# Set environment variables for compatibility with Bitnami-style charts
-ENV MONGODB_DATA_DIR="/data/db"
-ENV MONGODB_DAEMON_USER="mongodb"
-ENV MONGODB_DAEMON_GROUP="mongodb"
-ENV MONGODB_VOLUME_DIR="/data"
-ENV MONGODB_LOG_DIR="/data/logs"
-ENV MONGODB_TMP_DIR="/data/tmp"
+# Create a non-root user for security
+RUN groupadd -r mongo-group && useradd -r -g mongo-group mongo-user
 
-# Configure MongoDB to listen on all interfaces (required for Kubernetes)
-ENV MONGODB_EXTRA_FLAGS="--bind_ip_all"
+# Copy render template binary
+COPY --from=template-builder /opt/bitnami/common/bin/render-template /home/mongo-user/common/bin/render-template
 
-# Create directories with proper structure
-RUN mkdir -p /data/db /data/logs /data/tmp && \
-    chown -R 1001:1001 /data && \
-    chmod -R 755 /data
+# Copy recompiled binaries with updated dependencies
+COPY --from=builder /usr/local/bin/mongo* /usr/local/bin/bsondump /home/mongo-user/mongodb/bin/
 
-# Switch to mongodb user (UID 1001 to match Bitnami chart)
-USER 1001
+RUN find / -perm /6000 -type f -exec chmod a-s {} \; || true
 
-# Healthcheck
-HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-  CMD mongosh --eval "db.adminCommand('ping')" || exit 1
+# Copy scripts foldet to the container
+COPY --chown=mongo-user:mongo-group scripts /home/mongo-user/scripts
+
+COPY --chown=mongo-user:mongo-group ./templates /home/mongo-user/mongodb/templates
+
+# Post unpacking scripts
+RUN chmod -R +x /home/mongo-user/scripts/ && /home/mongo-user/scripts/postunpack.sh
+
+# Ensure runtime user owns its home so config files are readable
+RUN chown -R mongo-user:mongo-group /home/mongo-user
+
+# Metadata
+LABEL maintainer="Testkube Team" \
+  version="8.0.15-testkube" \
+  description="MongoDB 8.0.15 - Testkube Edition - Based on official"
+
+# Volumes for data persistence and certificates
+VOLUME [ "/home/mongo-user/volume/data" ]
 
 EXPOSE 27017
-ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
-CMD ["mongod"]
+
+# Set the user to run the container
+USER mongo-user
+WORKDIR /home/mongo-user
+
+ENTRYPOINT ["/home/mongo-user/scripts/entrypoint.sh"]
+CMD ["/home/mongo-user/scripts/run.sh"]
