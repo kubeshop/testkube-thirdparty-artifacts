@@ -143,7 +143,10 @@ auth:
   ## @param auth.useCredentialsFiles Mount credentials as a files instead of using an environment variable
   ##
   useCredentialsFiles: false
-  ## @param auth.useSecret Uses a secret to mount the credential files.
+  ## @param auth.createSecret Controls creation of the chart-managed secret. Disable when providing credentials via an existing secret or external injector.
+  ##
+  createSecret: true
+  ## @param auth.useSecret Controls creation and usage of a Kubernetes secret for credentials. When false, no secret is created and credentials must be supplied via values or external injection.
   ##
   useSecret: true
   ## @param auth.forceNewKeys Force root credentials (user and password) to be reconfigured every time they change in the secrets

@@ -93,7 +93,7 @@ Get the root password key.
 Return true if a secret object should be created
 */}}
 {{- define "minio.createSecret" -}}
-{{- if and (not .Values.auth.existingSecret) .Values.auth.useSecret -}}
+{{- if and .Values.auth.createSecret (not .Values.auth.existingSecret) .Values.auth.useSecret -}}
     {{- true -}}
 {{- end -}}
 {{- end -}}
@@ -140,6 +140,7 @@ Compile all warnings into a single message, and call fail.
 {{- $messages := append $messages (include "minio.validateValues.totalDrives" .) -}}
 {{- $messages := append $messages (include "minio.validateValues.tls" .) -}}
 {{- $messages := append $messages (include "minio.validateValues.defaultBuckets" .) -}}
+{{- $messages := append $messages (include "minio.validateValues.auth" .) -}}
 {{- $messages := without $messages "" -}}
 {{- $message := join "\n" $messages -}}
 
@@ -196,6 +197,16 @@ Validate values of MinIO&reg; - defaultBuckets does not work in distributed mode
 minio: defaultBuckets
     defaultBuckets does not work in distributed mode.
     Use a provisioning job instead.
+{{- end -}}
+{{- end -}}
+
+{{/*
+Validate values of MinIO® - ensure secret usage settings are consistent
+*/}}
+{{- define "minio.validateValues.auth" -}}
+{{- if and (not .Values.auth.useSecret) .Values.auth.useCredentialsFiles }}
+minio: auth.useCredentialsFiles
+    Mounting credential files requires a Kubernetes secret. Set auth.useSecret=true or disable auth.useCredentialsFiles.
 {{- end -}}
 {{- end -}}
 
