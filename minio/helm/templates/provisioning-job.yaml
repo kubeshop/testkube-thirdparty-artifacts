@@ -249,6 +249,7 @@ spec:
             - name: MINIO_ROOT_PASSWORD_FILE
               value: "/opt/bitnami/minio/secrets/root-password"
             {{- else }}
+            {{- if .Values.auth.useSecret }} (fix: change else-if to nested else/if blocks for helm template parser compatibility)
             - name: MINIO_ROOT_USER
               valueFrom:
                 secretKeyRef:
@@ -269,6 +270,7 @@ spec:
             {{- if $rootPassword }}
             - name: MINIO_ROOT_PASSWORD
               value: {{ $rootPassword | quote }}
+            {{- end }}
             {{- end }}
             {{- end }}
             {{- if .Values.tls.mountPath }}
