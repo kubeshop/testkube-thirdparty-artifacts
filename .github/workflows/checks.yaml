@@ -1,0 +1,36 @@
+name: Continuous Integration
+
+on:
+  workflow_dispatch:
+  push:
+    branches-ignore:
+      - main
+
+concurrency: ${{ github.workflow }}-${{ github.ref }}
+
+jobs:
+  build:
+    runs-on: depot-ubuntu-22.04
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v3
+      - uses: depot/setup-action@v1
+      - name: Build image
+        uses: depot/bake-action@v1.12.1
+        with:
+          project: ${{ secrets.DEPOT_PROJECT_ID }}
+          files: |
+            ./docker-bake.hcl
+  lint:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v3
+      - name: Lint helm charts
+        run: |
+          for chart in minio mongodb; do
+            helm lint $chart/helm
+          done;
+
+
