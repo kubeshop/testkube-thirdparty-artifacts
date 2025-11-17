@@ -3,7 +3,7 @@
 # shellcheck disable=SC1091
 
 # Load libraries
-. /home/mongo-user/scripts/lib/utils.sh
+. /opt/bitnami/scripts/lib/utils.sh
 
 # Functions
 
@@ -470,6 +470,26 @@ is_mongodb_running() {
 }
 
 ########################
+# Check if mongo is accepting requests
+# Globals:
+#   MONGODB_DATABASE and MONGODB_EXTRA_DATABASES
+# Arguments:
+#   None
+# Returns:
+#   Boolean
+#########################
+mongodb_is_mongodb_started() {
+    local result
+
+    result=$(
+        mongodb_execute_print_output <<EOF
+db
+EOF
+    )
+    [[ -n "$result" ]]
+}
+
+########################
 # Start MongoDB server in the background and waits until it's ready
 # Globals:
 #   MONGODB_*
@@ -495,15 +515,19 @@ mongodb_start_bg() {
 
     if am_i_root; then
         if is_boolean_yes "$MONGODB_ENABLE_NUMACTL"; then
-            debug_execute run_as_user "$MONGODB_DAEMON_USER" numactl --interleave=all "$MONGODB_BIN_DIR/mongod" "${flags[@]}"
+            # debug_execute run_as_user "$MONGODB_DAEMON_USER" numactl --interleave=all "$MONGODB_BIN_DIR/mongod" "${flags[@]}"
+            debug_execute run_as_user "$MONGODB_DAEMON_USER" numactl --interleave=all "mongod" "${flags[@]}"
         else
-            debug_execute run_as_user "$MONGODB_DAEMON_USER" "$MONGODB_BIN_DIR/mongod" "${flags[@]}"
+            # debug_execute run_as_user "$MONGODB_DAEMON_USER" "$MONGODB_BIN_DIR/mongod" "${flags[@]}"
+            debug_execute run_as_user "$MONGODB_DAEMON_USER" "mongod" "${flags[@]}"
         fi
     else
         if is_boolean_yes "$MONGODB_ENABLE_NUMACTL"; then
-            debug_execute numactl --interleave=all "$MONGODB_BIN_DIR/mongod" "${flags[@]}"
+            # debug_execute numactl --interleave=all "$MONGODB_BIN_DIR/mongod" "${flags[@]}"
+            debug_execute numactl --interleave=all "mongod" "${flags[@]}"
         else
-            debug_execute "$MONGODB_BIN_DIR/mongod" "${flags[@]}"
+            # debug_execute "$MONGODB_BIN_DIR/mongod" "${flags[@]}"
+            debug_execute "mongod" "${flags[@]}"
         fi
     fi
 
@@ -575,11 +599,11 @@ mongodb_execute_print_output() {
 
 ########################
 # Execute an arbitrary query/queries against the running MongoDB service,
-# discard its output unless BITNAMI_DEBUG is true
+# discard its output unless DEBUG is true
 # Stdin:
 #   Query/queries to execute
 # Globals:
-#   BITNAMI_DEBUG
+#   DEBUG
 # Arguments:
 #   $1 - User to run queries
 #   $2 - Password
@@ -790,6 +814,20 @@ get_mongo_port() {
     else
         echo "$MONGODB_PORT_NUMBER"
     fi
+}
+
+########################
+# Check if MongoDB is not running
+# Globals:
+#   MONGODB_PID_FILE
+# Arguments:
+#   None
+# Returns:
+#   Boolean
+#########################
+is_mongodb_not_running() {
+    ! is_mongodb_running
+    return "$?"
 }
 
 ########################
@@ -1499,5 +1537,40 @@ mongodb_custom_init_scripts() {
             esac
         done <$tmp_file
         touch "$MONGODB_VOLUME_DIR"/.user_scripts_initialized
+    fi
+}
+
+########################
+# Get if primary node is initialized
+# Globals:
+#   MONGODB_*
+# Arguments:
+#   $1 - node
+#   $2 - port
+# Returns:
+#   None
+#########################
+mongodb_is_primary_node_initiated() {
+    local node="${1:?node is required}"
+    local port="${2:?port is required}"
+    local result
+    result=$(
+        mongodb_execute_print_output "$MONGODB_ROOT_USER" "$MONGODB_ROOT_PASSWORD" "admin" "127.0.0.1" "$MONGODB_PORT_NUMBER" "${MONGODB_SHELL_EXTRA_FLAGS} --tlsAllowInvalidHostnames" <<EOF
+rs.initiate({"_id":"$MONGODB_REPLICA_SET_NAME", "members":[{"_id":0,"host":"$node:$port","priority":5}]})
+EOF
+    )
+
+    # Code 23 is considered OK
+    # It indicates that the node is already initialized
+    if grep -q "already initialized" <<<"$result"; then
+        warn "Node already initialized."
+        return 0
+    fi
+
+    if ! grep -q "ok: 1" <<<"$result"; then
+        warn "Problem initiating replica set
+            request: rs.initiate({\"_id\":\"$MONGODB_REPLICA_SET_NAME\", \"members\":[{\"_id\":0,\"host\":\"$node:$port\",\"priority\":5}]})
+            response: $result"
+        return 1
     fi
 }

@@ -8,11 +8,11 @@ set -o pipefail
 # set -o xtrace # Uncomment this line for debugging purposes
 
 # Load libraries
-. /home/mongo-user/scripts/lib/utils.sh
-. /home/mongo-user/scripts/lib/mongo.sh
+. /opt/bitnami/scripts/lib/utils.sh
+. /opt/bitnami/scripts/lib/mongo.sh
 
 # Load environment
-. /home/mongo-user/scripts/lib/mongodb-env.sh
+. /opt/bitnami/scripts/lib/mongodb-env.sh
 
 is_boolean_yes "$MONGODB_DISABLE_SYSTEM_LOG" && MONGODB_DISABLE_SYSTEM_LOG="true" || MONGODB_DISABLE_SYSTEM_LOG="false"
 is_boolean_yes "$MONGODB_ENABLE_DIRECTORY_PER_DB" && MONGODB_ENABLE_DIRECTORY_PER_DB="true" || MONGODB_ENABLE_DIRECTORY_PER_DB="false"
@@ -33,6 +33,8 @@ for dir in "$MONGODB_TMP_DIR" "$MONGODB_LOG_DIR" "$MONGODB_DATA_DIR"; do
     ensure_dir_exists "$dir"
     am_i_root && chown -R "${MONGODB_DAEMON_USER}:${MONGODB_DAEMON_GROUP}" "$dir"
 done
+
+am_i_root && chown -R "${MONGODB_DAEMON_USER}:${MONGODB_DAEMON_GROUP}" "$MONGODB_DATA_DIR"
 am_i_root && configure_permissions_ownership "$MONGODB_CONF_FILE" -f "640" -g "$MONGODB_DAEMON_GROUP"
 
 # Ensure MongoDB is initialized

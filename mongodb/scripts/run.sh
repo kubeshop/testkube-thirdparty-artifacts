@@ -8,11 +8,11 @@ set -o pipefail
 # set -o xtrace # Uncomment this line for debugging purposes
 
 # Load libraries
-. /home/mongo-user/scripts/lib/utils.sh
-. /home/mongo-user/scripts/lib/mongo.sh
+. /opt/bitnami/scripts/lib/utils.sh
+. /opt/bitnami/scripts/lib/mongo.sh
 
 # Load environment
-. /home/mongo-user/scripts/lib/mongodb-env.sh
+. /opt/bitnami/scripts/lib/mongodb-env.sh
 
 cmd=$(command -v mongod)
 

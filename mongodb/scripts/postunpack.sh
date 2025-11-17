@@ -7,17 +7,17 @@ set -o nounset
 set -o pipefail
 
 # Load libraries
-. /home/mongo-user/scripts/lib/utils.sh
+. /opt/bitnami/scripts/lib/utils.sh
 
 # Load environment
-. /home/mongo-user/scripts/lib/mongodb-env.sh
+. /opt/bitnami/scripts/lib/mongodb-env.sh
 
 for dir in "$MONGODB_TMP_DIR" "$MONGODB_LOG_DIR" "$MONGODB_CONF_DIR" "$MONGODB_DEFAULT_CONF_DIR" "$MONGODB_DATA_DIR" "$MONGODB_VOLUME_DIR" "$MONGODB_INITSCRIPTS_DIR"; do
     ensure_dir_exists "$dir"
 done
 chmod -R g+rwX "$MONGODB_TMP_DIR" "$MONGODB_LOG_DIR" "$MONGODB_CONF_DIR" "$MONGODB_DATA_DIR" "$MONGODB_VOLUME_DIR" "$MONGODB_INITSCRIPTS_DIR"
 
-render-template "$MONGODB_MONGOD_TEMPLATES_FILE" >"$MONGODB_CONF_FILE"
+render-template "$MONGODB_MONGOD_TEMPLATES_FILE" > "$MONGODB_CONF_FILE"
 
 # Create .dbshell file to avoid error message
 touch "$MONGODB_DB_SHELL_FILE" && chmod g+rw "$MONGODB_DB_SHELL_FILE"

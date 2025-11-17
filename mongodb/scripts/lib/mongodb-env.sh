@@ -4,10 +4,10 @@
 
 # Load logging library
 # shellcheck disable=SC1090,SC1091
-. /home/mongo-user/scripts/lib/utils.sh
+. /opt/bitnami/scripts/lib/utils.sh
 
-export ROOT_DIR="/home/mongo-user"
-export VOLUME_DIR="/home/mongo-user/volume"
+export ROOT_DIR="/opt/bitnami"
+export VOLUME_DIR="/bitnami"
 
 # Logging configuration
 export MODULE="${MODULE:-mongodb}"
@@ -96,8 +96,8 @@ export MONGODB_LOG_FILE="$MONGODB_LOG_DIR/mongodb.log"
 export MONGODB_INITSCRIPTS_DIR="/docker-entrypoint-initdb.d"
 
 # System users (when running with a privileged user)
-export MONGODB_DAEMON_USER="mongo-user"
-export MONGODB_DAEMON_GROUP="mongo-group"
+export MONGODB_DAEMON_USER="mongo"
+export MONGODB_DAEMON_GROUP="mongo"
 
 # MongoDB configuration
 export MONGODB_MOUNTED_CONF_DIR="${MONGODB_MOUNTED_CONF_DIR:-${MONGODB_VOLUME_DIR}/conf}"
