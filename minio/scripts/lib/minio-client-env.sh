@@ -4,9 +4,10 @@
 
 # Load logging library
 # shellcheck disable=SC1090,SC1091
-. /home/minio-user/scripts/lib/utils.sh
+. /opt/bitnami/scripts/lib/utils.sh
 
-export ROOT_DIR="/home/minio-user"
+export ROOT_DIR="/opt/bitnami"
+export VOLUME_DIR="/bitnami"
 
 # Logging configuration
 export MODULE="${MODULE:-minio-client}"

@@ -3,7 +3,7 @@
 # shellcheck disable=SC1091
 
 # Load Generic Libraries
-. /home/minio-user/scripts/lib/utils.sh
+. /opt/bitnami/scripts/lib/utils.sh
 
 # Functions
 
