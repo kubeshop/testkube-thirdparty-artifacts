@@ -56,20 +56,24 @@ spec:
       schedulerName: {{ .Values.schedulerName | quote }}
       {{- end }}
       serviceAccountName: {{ template "mongodb.serviceAccountName" . }}
-      {{- if .Values.affinity }}
-      affinity: {{- include "common.tplvalues.render" (dict "value" .Values.affinity "context" $) | nindent 8 }}
+      {{- $affinity := coalesce .Values.global.affinity .Values.affinity -}}
+      {{- if not (empty $affinity) }}
+      affinity: {{- include "common.tplvalues.render" (dict "value" $affinity "context" $) | nindent 8 }}
       {{- else }}
       affinity:
         podAffinity: {{- include "common.affinities.pods" (dict "type" .Values.podAffinityPreset "component" "mongodb" "customLabels" $podLabels "topologyKey" .Values.topologyKey "context" $) | nindent 10 }}
         podAntiAffinity: {{- include "common.affinities.pods" (dict "type" .Values.podAntiAffinityPreset "component" "mongodb" "customLabels" $podLabels "topologyKey" .Values.topologyKey "context" $) | nindent 10 }}
         nodeAffinity: {{- include "common.affinities.nodes" (dict "type" .Values.nodeAffinityPreset.type "key" .Values.nodeAffinityPreset.key "values" .Values.nodeAffinityPreset.values) | nindent 10 }}
       {{- end }}
-      {{- if .Values.nodeSelector }}
-      nodeSelector: {{- include "common.tplvalues.render" (dict "value" .Values.nodeSelector "context" $) | nindent 8 }}
+      {{- $nodeSelector := coalesce .Values.global.nodeSelector .Values.nodeSelector -}}
+      {{- if not (empty $nodeSelector) }}
+      nodeSelector: {{- include "common.tplvalues.render" (dict "value" $nodeSelector "context" $) | nindent 8 }}
       {{- end }}
-      {{- if .Values.tolerations }}
-      tolerations: {{- include "common.tplvalues.render" (dict "value" .Values.tolerations "context" $) | nindent 8 }}
+      {{- $tolerations := coalesce .Values.global.tolerations .Values.tolerations -}}
+      {{- if not (empty $tolerations) }}
+      tolerations: {{- include "common.tplvalues.render" (dict "value" $tolerations "context" $) | nindent 6 }}
       {{- end }}
+      {{- $topConstraints := coalesce .Values.global.topologySpreadConstraints .Values.topologySpreadConstraints -}}
       {{- if .Values.priorityClassName }}
       priorityClassName: {{ .Values.priorityClassName }}
       {{- end }}
@@ -159,7 +163,7 @@ spec:
           lifecycle: {{- include "common.tplvalues.render" (dict "value" .Values.lifecycleHooks "context" $) | nindent 12 }}
           {{- end }}
           env:
-            - name: BITNAMI_DEBUG
+            - name: DEBUG
               value: {{ ternary "true" "false" (or .Values.image.debug .Values.diagnosticMode.enabled) | quote }}
             {{- $customUsers := include "mongodb.customUsers" . -}}
             {{- $customDatabases := include "mongodb.customDatabases" . -}}

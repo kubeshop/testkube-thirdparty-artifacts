@@ -39,6 +39,12 @@ global:
   ## global PodDisruptionBudget
   podDisruptionBudget:
     enabled: true
+  # -- Global Tolerations
+  tolerations: []
+  # -- Global NodeSelector
+  nodeSelector: {}
+  # -- Global Affinity
+  affinity: {}
 
 ## @section Common parameters
 ##
