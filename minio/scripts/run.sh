@@ -8,10 +8,10 @@ set -o pipefail
 #set -o xtrace
 
 # Load libraries
-. /home/minio-user/scripts/lib/utils.sh
+. /opt/bitnami/scripts/lib/utils.sh
 
 # Load MinIO environment
-. /home/minio-user/scripts/lib/minio-env.sh
+. /opt/bitnami/scripts/lib/minio-env.sh
 
 # Constants
 EXEC=$(command -v minio)

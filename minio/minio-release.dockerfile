@@ -41,7 +41,8 @@ ENV HOME="/" \
     OS_ARCH="${TARGETARCH:-amd64}" \
     MINIO_SERVER_VERSION=RELEASE.2025-10-15T17-29-55Z \
     MINIO_CLIENT_VERSION=RELEASE.2025-08-13T08-35-41Z \
-    APP_NAME=minio
+    APP_NAME=minio \
+    PATH="/opt/bitnami/common/bin:/opt/bitnami/minio-client/bin:/opt/bitnami/minio/bin:$PATH"
 
 # Metadata
 LABEL maintainer="Testkube Team" \
@@ -69,49 +70,50 @@ RUN curl -fsSL "https://github.com/bitnami/wait-for-port/releases/download/v1.0.
   && rm -f /tmp/wait-for-port.tar.gz
 
 # Create a non-root user for security
-RUN groupadd -r minio-group && useradd -r -g minio-group minio-user
+# RUN groupadd -r minio-group && useradd -r -g minio-group minio-user
 
 # Copy Minio Client binary from build stage and set permissions
-COPY --from=build /build/mc/mc /usr/local/bin/mc
-RUN chmod +x /usr/local/bin/mc
+COPY --from=build /build/mc/mc /opt/bitnami/common/bin/mc
+RUN chmod +x /opt/bitnami/common/bin/mc
 
 # Copy Minio Server binary from build stage and set permissions
-COPY --from=build /build/minio/minio /usr/local/bin/minio
-RUN chmod +x /usr/local/bin/minio
+COPY --from=build /build/minio/minio /opt/bitnami/common/bin/minio
+RUN chmod +x /opt/bitnami/common/bin/minio
 
 # Create a data directory and set permissions
-RUN mkdir -p /home/minio-user/data && \
-    chown -R minio-user:minio-group /home/minio-user/data
+# RUN mkdir -p /bitnami/minio/data && \
+#     chown -R minio-user:minio-group /bitnami/minio/data
 
 # Create a tmp directory and chown it so PID process can be created without requiring root
-RUN mkdir -p /home/minio-user/minio/tmp && \
-    chown -R minio-user:minio-group /home/minio-user
+# RUN mkdir -p /bitnami/minio/minio/tmp && \
+#     chown -R minio-user:minio-group /home/minio-user
 
 # Create a directory for Minio client configuration
-RUN mkdir -p /home/minio-user/.mc && \
-    chown -R minio-user:minio-group /home/minio-user/.mc
+# RUN mkdir -p /bitnami/minio/.mc && \
+#     chown -R minio-user:minio-group /bitnami/minio/.mc
+
+RUN chmod g+rwX /opt/bitnami
 
 # Remove setuid and setgid permissions for security hardening
 RUN find / -perm /6000 -type f -exec chmod a-s {} \; || true
 
 # Copy scripts foldet to the container
-COPY --chown=minio-user:minio-group scripts /home/minio-user/scripts
+COPY scripts /opt/bitnami/scripts
 
 # Post unpacking scripts
-RUN chmod -R +x /home/minio-user/scripts/ && /home/minio-user/scripts/postunpack.sh
+RUN /opt/bitnami/scripts/postunpack.sh
 
 # Volumes for data persistence and certificates
-VOLUME [ "/home/minio-user/data", "/certs" ]
+VOLUME [ "/bitnami/minio/data", "/certs" ]
 
 # Expose the Minio API and Console ports
 EXPOSE 9000 9001
 
 # Set the user to run the container
-USER minio-user
-WORKDIR /home/minio-user
+USER 1001
 
 # Set the entrypoint to run Minio server
-ENTRYPOINT ["/home/minio-user/scripts/entrypoint.sh"]
+ENTRYPOINT ["/opt/bitnami/scripts/entrypoint.sh"]
 
 # Start the Minio server
-CMD ["/home/minio-user/scripts/run.sh"]
+CMD ["/opt/bitnami/scripts/run.sh"]

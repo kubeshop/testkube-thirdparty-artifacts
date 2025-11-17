@@ -8,11 +8,11 @@ set -o pipefail
 #set -o xtrace
 
 # Load libraries
-. /home/minio-user/scripts/lib/minio.sh
-. /home/minio-user/scripts/lib/utils.sh
+. /opt/bitnami/scripts/lib/minio.sh
+. /opt/bitnami/scripts/lib/utils.sh
 
 # Load MinIO environment
-. /home/minio-user/scripts/lib/minio-env.sh
+. /opt/bitnami/scripts/lib/minio-env.sh
 
 MINIO_SERVER_SCHEME=$(echo "$MINIO_SCHEME" | tr '[:upper:]' '[:lower:]')
 
@@ -22,7 +22,7 @@ export MINIO_SERVER_ROOT_PASSWORD="${MINIO_ROOT_PASSWORD:-}"
 export MINIO_SERVER_SCHEME
 
 # Load MinIO Client environment
-. /home/minio-user/scripts/lib/minio-client-env.sh
+. /opt/bitnami/scripts/lib/minio-client-env.sh
 
 # Validate settings in MINIO_* env vars.
 minio_validate

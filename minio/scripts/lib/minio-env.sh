@@ -5,9 +5,10 @@
 # Load logging library
 # shellcheck disable=SC1090,SC1091
 
-. /home/minio-user/scripts/lib/utils.sh
+. /opt/bitnami/scripts/lib/utils.sh
 
-export ROOT_DIR="/home/minio-user"
+export ROOT_DIR="/opt/bitnami"
+export VOLUME_DIR="/bitnami"
 
 # Logging configuration
 export MODULE="${MODULE:-minio}"
@@ -59,8 +60,8 @@ export MINIO_PID_FILE="${MINIO_TMP_DIR}/minio.pid"
 export PATH="${MINIO_BIN_DIR}:${PATH}"
 
 # System users (when running with a privileged user)
-export MINIO_DAEMON_USER="minio-user"
-export MINIO_DAEMON_GROUP="minio-group"
+export MINIO_DAEMON_USER="minio"
+export MINIO_DAEMON_GROUP="minio"
 
 # MinIO configuration
 export MINIO_API_PORT_NUMBER="${MINIO_API_PORT_NUMBER:-9000}"

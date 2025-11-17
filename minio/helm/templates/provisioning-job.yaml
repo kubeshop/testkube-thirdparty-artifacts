@@ -173,7 +173,7 @@ spec:
               {{- if gt (len .Values.provisioning.usersExistingSecrets) 0 }}
               while read -d '' configFile; do
                 addUsersFromFile "${configFile}";
-              done < <(find "/home/minio-user/users/" -type l -not -name '..data' -print0);
+              done < <(find "/opt/bitnami/minio/users/" -type l -not -name '..data' -print0);
               {{- end }}
 
               {{- range $group := .Values.provisioning.groups }}
@@ -245,9 +245,9 @@ spec:
               value: {{ ternary "https" "http" .Values.tls.enabled | quote }}
             {{- if .Values.auth.useCredentialsFiles }}
             - name: MINIO_ROOT_USER_FILE
-              value: "/home/minio-user/secrets/root-user"
+              value: "/opt/bitnami/minio/secrets/root-user"
             - name: MINIO_ROOT_PASSWORD_FILE
-              value: "/home/minio-user/secrets/root-password"
+              value: "/opt/bitnami/minio/secrets/root-password"
             {{- else }}
             - name: MINIO_ROOT_USER
               valueFrom:
@@ -283,7 +283,7 @@ spec:
               mountPath: /.mc
               subPath: app-mc-dir
             - name: empty-dir
-              mountPath: /home/minio-user/tmp
+              mountPath: /opt/bitnami/minio/tmp
               subPath: app-tmp-dir
             - name: empty-dir
               mountPath: /tmp
@@ -294,7 +294,7 @@ spec:
             {{- end }}
             {{- if .Values.auth.useCredentialsFiles }}
             - name: minio-credentials
-              mountPath: /home/minio-user/secrets/
+              mountPath: /opt/bitnami/minio/secrets/
             {{- end }}
             {{- if .Values.tls.enabled }}
             - name: minio-certs
@@ -304,7 +304,7 @@ spec:
             {{- end }}
             {{- range $idx, $_ := .Values.provisioning.usersExistingSecrets }}
             - name: {{ printf "users-secret-%d" $idx }}
-              mountPath: /home/minio-user/users/{{ $idx }}/
+              mountPath: /opt/bitnami/minio/users/{{ $idx }}/
             {{- end }}
             {{- if .Values.provisioning.extraVolumeMounts }}
             {{- include "common.tplvalues.render" (dict "value" .Values.provisioning.extraVolumeMounts "context" $) | nindent 12 }}

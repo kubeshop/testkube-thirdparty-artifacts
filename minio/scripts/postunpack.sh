@@ -3,13 +3,13 @@
 # shellcheck disable=SC1090,SC1091
 
 # Load libraries
-. /home/minio-user/scripts/lib/utils.sh
+. /opt/bitnami/scripts/lib/utils.sh
 
 # Load MinIO environment
-. /home/minio-user/scripts/lib/minio-env.sh
+. /opt/bitnami/scripts/lib/minio-env.sh
 
 # Load MinIO Client environment
-. /home/minio-user/scripts/lib/minio-client-env.sh
+. /opt/bitnami/scripts/lib/minio-client-env.sh
 
 for dir in "$MINIO_CLIENT_BASE_DIR" "$MINIO_CLIENT_CONF_DIR"; do
     ensure_dir_exists "$dir"
