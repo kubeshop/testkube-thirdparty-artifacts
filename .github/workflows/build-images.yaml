@@ -44,7 +44,7 @@ jobs:
           case "$ref" in
             minio-*)   echo "tag=${ref#minio-}"   >>"$GITHUB_OUTPUT" ;;
             mongodb-*) echo "tag=${ref#mongodb-}" >>"$GITHUB_OUTPUT" ;;
-            *)         echo "tag=$ref" >>"$GITHUB_OUTPUT" ;;
+            *)         echo "tag=temp-$ref" >>"$GITHUB_OUTPUT" ;;
           esac
       - name: Create Docker tags and metadata for Minio
         if: github.ref_type == 'branch' || (github.ref_type == 'tag' && startsWith(github.ref_name, 'minio'))
