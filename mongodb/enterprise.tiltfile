@@ -2,21 +2,8 @@ def version_list():
   """
   Returns a list of Testkube versions pulled to local folder.
   """
-
-
-  # Prefer explicit TESTKUBE_VERSION env var if provided
-  explicit_version = os.getenv('TESTKUBE_VERSION', '')
-  if explicit_version:
-    return [explicit_version]
-
-  # Otherwise, attempt to infer from ../charts, ignoring empty results
-  charts_list = local('ls -A ../charts | tr -d "tke-"', quiet=True)
-  inferred_versions = [v for v in str(charts_list).strip().split("\n") if v]
-  if inferred_versions:
-    return inferred_versions
-
-  # Final fallback to a sane default to avoid invalid namespaces like "testkube-"
-  return ["8.0.15"]
+  charts_list = local('ls -A ../charts | grep -i "tke-" | tr -d "tke-"')
+  return str(charts_list).strip().split("\n")
 
 def deploy_testkube_instances(version):
   """
@@ -42,7 +29,7 @@ metadata:
   print("Deploying Testkube version: %s" % version)
   yaml = helm('../charts/tke-%s/testkube-enterprise' % version, name='testkube', namespace='testkube-%s' % version.replace(".", "-"), values='./values.demo.yaml')
   k8s_yaml(yaml)
-  # TODO: this grouping does not work with multiple versions
+  # # TODO: this grouping does not work with multiple versions
   print("Setting up port forwards and resources for Testkube version: %s" % version)
   k8s_resource(workload='testkube-enterprise-ui', port_forwards=8080, labels='testkube-enterprise')
   k8s_resource(workload='testkube-enterprise-api', port_forwards=8090, labels='testkube-enterprise')

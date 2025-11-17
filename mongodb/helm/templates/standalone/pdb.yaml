@@ -3,7 +3,7 @@ Copyright Broadcom, Inc. All Rights Reserved.
 SPDX-License-Identifier: APACHE-2.0
 */}}
 
-{{- if or (and (not (eq .Values.architecture "replicaset")) .Values.pdb.create) .Values.global.podDisruptionBudget.enabled }}
+{{- if or (and (not (eq .Values.architecture "replicaset")) .Values.pdb.create) (and (not (eq .Values.architecture "replicaset")) .Values.global.podDisruptionBudget.enabled) }}
 apiVersion: {{ include "common.capabilities.policy.apiVersion" . }}
 kind: PodDisruptionBudget
 metadata:
