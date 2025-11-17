@@ -62,15 +62,39 @@ SHELL ["/bin/bash", "-o", "errexit", "-o", "nounset", "-o", "pipefail", "-c"]
 RUN apt-get update && \
     apt-get upgrade -y && \
     apt-get install -y --no-install-recommends \
-        coreutils \
-        libssl3t64 \
-        openssl \
-        tar \
-        yq \
         ca-certificates \
         curl \
+        libbrotli1 \
+        libcom-err2 \
+        libcurl4 \
+        libffi8 \
+        libgcc-s1 \
+        libgmp10 \
+        libgnutls30 \
+        libgssapi-krb5-2 \
+        libhogweed6 \
+        libidn2-0 \
+        libk5crypto3 \
+        libkeyutils1 \
+        libkrb5-3 \
+        libkrb5support0 \
+        libldap2 \
+        libnettle8 \
+        libnghttp2-14 \
+        libp11-kit0 \
+        libpsl5 \
+        librtmp1 \
+        libsasl2-2 \
+        libssh2-1 \
+        libssl3 \
+        libtasn1-6 \
+        libunistring5 \
+        libzstd1 \
         numactl \
         procps \
+        zlib1g \
+        yq \
+        wait-for-it \
     && apt-get autoremove -y \
     && apt-get autoclean \
     && apt-get clean \
@@ -84,27 +108,24 @@ RUN curl -fsSL "https://github.com/bitnami/wait-for-port/releases/download/v1.0.
   && find /tmp -maxdepth 1 -type f -name 'wait-for-port*' -delete \
   && rm -f /tmp/wait-for-port.tar.gz
 
-# Create a non-root user for security
-RUN groupadd -r mongo-group && useradd -r -g mongo-group mongo-user
-
 # Copy render template binary
-COPY --from=template-builder /opt/bitnami/common/bin/render-template /home/mongo-user/common/bin/render-template
+COPY --from=template-builder /opt/bitnami/common/bin/render-template /opt/bitnami/common/bin/render-template
+
+RUN mkdir -p /opt/bitnami/mongodb
 
 # Copy recompiled binaries with updated dependencies
-COPY --from=builder /usr/local/bin/mongo* /usr/local/bin/bsondump /home/mongo-user/mongodb/bin/
-
-RUN find / -perm /6000 -type f -exec chmod a-s {} \; || true
+COPY --from=builder /usr/local/bin/mongo* /usr/local/bin/bsondump /opt/bitnami/mongodb/bin/
 
 # Copy scripts foldet to the container
-COPY --chown=mongo-user:mongo-group scripts /home/mongo-user/scripts
+COPY scripts /opt/bitnami/scripts
 
-COPY --chown=mongo-user:mongo-group ./templates /home/mongo-user/mongodb/templates
+COPY ./templates /opt/bitnami/mongodb/templates
+
+RUN chmod -R g+rwX /opt/bitnami
+RUN find / -perm /6000 -type f -exec chmod a-s {} \; || true
 
 # Post unpacking scripts
-RUN chmod -R +x /home/mongo-user/scripts/ && /home/mongo-user/scripts/postunpack.sh
-
-# Ensure runtime user owns its home so config files are readable
-RUN chown -R mongo-user:mongo-group /home/mongo-user
+RUN /opt/bitnami/scripts/postunpack.sh
 
 # Metadata
 LABEL maintainer="Testkube Team" \
@@ -112,13 +133,12 @@ LABEL maintainer="Testkube Team" \
   description="MongoDB 8.0.15 - Testkube Edition - Based on official"
 
 # Volumes for data persistence and certificates
-VOLUME [ "/home/mongo-user/volume/data" ]
+VOLUME [ "/volume/mongodb/data/db", "/certs" ]
 
 EXPOSE 27017
 
 # Set the user to run the container
-USER mongo-user
-WORKDIR /home/mongo-user
+USER 1001
 
-ENTRYPOINT ["/home/mongo-user/scripts/entrypoint.sh"]
-CMD ["/home/mongo-user/scripts/run.sh"]
+ENTRYPOINT ["/opt/bitnami/scripts/entrypoint.sh"]
+CMD ["/opt/bitnami/scripts/run.sh"]

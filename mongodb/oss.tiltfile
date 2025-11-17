@@ -1,0 +1,34 @@
+def oss_version_list():
+  """
+  Returns a list of Testkube OSS versions pulled to local folder.
+  """
+  charts_list = local('ls -A ../charts | tr -d "tkoss-"')
+  return str(charts_list).strip().split("\n")
+
+def deploy_testkube_oss_instances(version):
+  """
+  Deploys the Testkube OSS and MongoDB instance using Helm charts into this folder.
+  """
+  testkube_namespace = """
+kind: Namespace
+apiVersion: v1
+metadata:
+  name: testkube-oss-%s
+  """ % version.replace(".", "-")
+  print("Creating namespace: %s" % testkube_namespace)
+  k8s_yaml([blob(testkube_namespace)])
+  print("Building MongoDB latest docker image for Testkube OSS version: %s" % version)
+  docker_build(
+    'testkube/mongodb:latest',
+    context='.',
+    dockerfile='minio-release.dockerfile'
+  )
+  print("Deploying MongoDB for Testkube OSS version: %s" % version)
+  yaml = helm('./helm', name='testkube-mongodb', namespace='testkube-oss-%s' % version.replace(".", "-"), values='./mongo.values.yaml')
+  k8s_yaml(yaml)
+  print("Deploying Testkube OSS version: %s" % version)
+  yaml = helm('../charts/tkoss-%s/testkube' % version, name='testkube', namespace='testkube-oss-%s' % version.replace(".", "-"))
+  k8s_yaml(yaml)
+
+# TODO: find a way to make grouping work with multiple versions or testkube
+[deploy_testkube_oss_instances(version) for version in oss_version_list()]
