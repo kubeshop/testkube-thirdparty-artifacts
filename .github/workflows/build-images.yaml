@@ -3,6 +3,8 @@ name: Build Images
 on:
   push:
     branches: [main]
+    tags:
+      - '*'
 
 concurrency: ${{ github.workflow }}-${{ github.ref }}
 
@@ -27,12 +29,24 @@ jobs:
       - name: Configure Docker for GAR
         run: gcloud auth configure-docker ${{ env.GAR_LOCATION }}-docker.pkg.dev -q
       - name: Create Docker tags and metadata for Minio
+        if: github.ref_type == "branch" || (github.ref_type == "tag" && startsWith(github.ref_name, "minio"))
         id: minio
         uses: docker/metadata-action@v5
         with:
           bake-target: 'minio'
           images: |
             ${{ env.GAR_LOCATION }}-docker.pkg.dev/${{ env.GAR_PROJECT_ID }}/${{ env.GAR_REPOSITORY }}/minio
+          tags: |
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+      - name: Create Docker tags and metadata for MongoDB
+        if: github.ref_type == "branch" || (github.ref_type == "tag" && startsWith(github.ref_name, "mongodb"))
+        id: mongodb
+        uses: docker/metadata-action@v5
+        with:
+          bake-target: 'mongodb'
+          images: |
+            ${{ env.GAR_LOCATION }}-docker.pkg.dev/${{ env.GAR_PROJECT_ID }}/${{ env.GAR_REPOSITORY }}/mongodb
           tags: |
             type=ref,event=branch
             type=semver,pattern={{version}}
@@ -47,8 +61,7 @@ jobs:
           files: |
             ./docker-bake.hcl
             ${{ steps.minio.outputs.bake-file }}
-          set: |
-            minio.args.VERSION=${{ fromJSON(steps.minio.outputs.json).labels['org.opencontainers.image.version'] }}
+            ${{ steps.mongodb.outputs.bake-file }}
           push: true
           save: true
           save-tag: ${{ steps.short-sha.outputs.sha }}
