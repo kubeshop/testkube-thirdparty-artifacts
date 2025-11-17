@@ -131,6 +131,7 @@ spec:
             - name: MINIO_ROOT_PASSWORD_FILE
               value: "/opt/bitnami/minio/secrets/root-password"
             {{- else }}
+            {{- if .Values.auth.useSecret }}
             - name: MINIO_ROOT_USER
               valueFrom:
                 secretKeyRef:
@@ -141,6 +142,18 @@ spec:
                 secretKeyRef:
                   name: {{ include "minio.secretName" . }}
                   key: {{ include "minio.rootPasswordKey" . }}
+            {{- else }}
+            {{- $rootUser := tpl .Values.auth.rootUser $ }}
+            {{- if $rootUser }}
+            - name: MINIO_ROOT_USER
+              value: {{ $rootUser | quote }}
+            {{- end }}
+            {{- $rootPassword := tpl .Values.auth.rootPassword $ }}
+            {{- if $rootPassword }}
+            - name: MINIO_ROOT_PASSWORD
+              value: {{ $rootPassword | quote }}
+            {{- end }}
+            {{- end }}
             {{- end }}
             {{- if .Values.defaultBuckets }}
             - name: MINIO_DEFAULT_BUCKETS

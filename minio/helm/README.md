@@ -50,7 +50,8 @@ Testkube helm chart to deploy Minio instance needed to store artifacts generated
 | auth.rootUser | string | `"admin"` |  |
 | auth.rootUserSecretKey | string | `""` |  |
 | auth.useCredentialsFiles | bool | `false` |  |
-| auth.useSecret | bool | `true` |  |
+| auth.createSecret | bool | `true` | Controls creation of the chart-managed secret. Disable when providing credentials via an existing secret or external injector. |
+| auth.useSecret | bool | `true` | Controls creation and usage of a Kubernetes secret for root credentials. Disable when credentials are injected by another mechanism. |
 | automountServiceAccountToken | bool | `false` |  |
 | clientImage.digest | string | `""` |  |
 | clientImage.registry | string | `"us-east1-docker.pkg.dev"` |  |
