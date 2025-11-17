@@ -14,6 +14,6 @@ target "mongodb-meta" {}
 target "mongodb" {
   inherits = ["mongodb-meta"]
   context= "./mongodb"
-  dockerfile = "mongodb-8.dockerfile"
+  dockerfile = "mongo-8.dockerfile"
   platforms = ["linux/arm64", "linux/amd64"]
 }
