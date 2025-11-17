@@ -3,8 +3,8 @@
 # shellcheck disable=SC1091
 
 # Load Libraries
-. /home/minio-user/scripts/lib/minio-client.sh
-. /home/minio-user/scripts/lib/utils.sh
+. /opt/bitnami/scripts/lib/minio-client.sh
+. /opt/bitnami/scripts/lib/utils.sh
 
 # Functions
 

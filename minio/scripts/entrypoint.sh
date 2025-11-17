@@ -8,11 +8,11 @@ set -o pipefail
 #set -o xtrace
 
 # Load libraries
-. /home/minio-user/scripts/lib/utils.sh
+. /opt/bitnami/scripts/lib/utils.sh
 
-if [[ "$*" = *"/home/minio-user/scripts/run.sh"* ]]; then
+if [[ "$*" = *"/opt/bitnami/scripts/run.sh"* ]]; then
     info "** Starting MinIO setup **"
-    /home/minio-user/scripts/setup.sh
+    /opt/bitnami/scripts/setup.sh
     info "** MinIO setup finished! **"
 fi
 
