@@ -2,7 +2,7 @@ def oss_version_list():
   """
   Returns a list of Testkube OSS versions pulled to local folder.
   """
-  charts_list = local('ls -A ../charts | tr -d "tkoss-"')
+  charts_list = local('ls -A ../charts | grep -i "tkoss-" | tr -d "tkoss-"')
   return str(charts_list).strip().split("\n")
 
 def deploy_testkube_oss_instances(version):
@@ -27,7 +27,9 @@ metadata:
   yaml = helm('./helm', name='testkube-minio', namespace='testkube-oss-%s' % version.replace(".", "-"), values='./minio.values.yaml')
   k8s_yaml(yaml)
   print("Deploying Testkube OSS version: %s" % version)
-  yaml = helm('../charts/tkoss-%s/testkube' % version, name='testkube', namespace='testkube-oss-%s' % version.replace(".", "-"))
+  yaml = helm('../charts/tkoss-%s/testkube' % version, name='testkube', namespace='testkube-oss-%s' % version.replace(".", "-"), set=[
+    "testkube-api.minio.enabled=false",
+  ])
   k8s_yaml(yaml)
 
 # TODO: find a way to make grouping work with multiple versions or testkube
