@@ -49,14 +49,14 @@ Steps used to test:
 3. Start tilt to deploy local MongoDB image and chart with each selected Testkube version:
 
    ```bash
-   tilt up
+   tilt up -f enterprise.tiltfile
    ```
 
 To clean up run the following commands:
 
 ```bash
-tilt down
-tilt docker-prune
+tilt down -f enterprise.tiltfile
+tilt docker-prune -f enterprise.tiltfile
 ```
 
 ### Testkube OSS
@@ -71,7 +71,20 @@ Steps used to test:
 1. Pull latest published Testkube Enteprise helm chart:
 
    ```bash
-   for version in 2.3.0 2.2.13; do
+   for version in 2.4.1; do
    helm pull oci://us-east1-docker.pkg.dev/testkube-cloud-372110/testkube/testkube --version $version --untar -d charts/tkoss-$version
    done
    ```
+
+2. Start tilt to deploy local MongoDB image and chart with each selected Testkube version:
+
+   ```bash
+   tilt up -f oss.tiltfile
+   ```
+
+To clean up run the following commands:
+
+```bash
+tilt down -f oss.tiltfile
+tilt docker-prune -f oss.tiltfile
+```
