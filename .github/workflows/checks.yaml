@@ -1,4 +1,4 @@
-name: Continuous Integration
+name: Checks before merging
 
 on:
   workflow_dispatch:
@@ -30,6 +30,9 @@ jobs:
       - name: Lint helm charts
         run: |
           for chart in minio mongodb; do
+            echo "Building dependencies of $chart helm chart"
+            helm dependency build $chart/helm
+            echo "Linting $chart helm chart"
             helm lint $chart/helm
           done;
 

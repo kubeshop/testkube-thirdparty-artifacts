@@ -29,9 +29,11 @@ jobs:
         name: Publish Helm Chart
         run: |
           for chart in minio mongodb; do
-            echo "Generating $chart helm binary"
+            echo "Building dependencies of $chart helm chart"
+            helm dependency build $chart/helm
+            echo "Generating $chart helm chart"
             helm package $chart/helm
-            echo "Publishing $chart helm binary"
+            echo "Publishing $chart helm chart"
             helm push \
               $(ls -A | grep -e "^$chart.*tgz$") \
               oci://${{ env.GAR_LOCATION }}-docker.pkg.dev/${{ env.GAR_PROJECT_ID }}/${{ env.CHARTS_REPOSITORY }}
