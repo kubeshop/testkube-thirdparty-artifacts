@@ -2,7 +2,7 @@ name: Build Images
 
 on:
   push:
-    branches: [main]
+    branches: [main, fix/pipelines]
     tags:
       - '*'
 
@@ -40,7 +40,7 @@ jobs:
             type=ref,event=branch
             type=semver,pattern={{version}}
       - name: Create Docker tags and metadata for MongoDB
-        if: github.ref_type == "branch" || (github.ref_type == "tag" && startsWith(github.ref_name, "mongodb"))
+        if: github.ref_type == 'branch' || (github.ref_type == 'tag' && startsWith(github.ref_name, 'mongodb'))
         id: mongodb
         uses: docker/metadata-action@v5
         with:
