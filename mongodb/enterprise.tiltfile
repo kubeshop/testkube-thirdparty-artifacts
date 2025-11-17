@@ -2,7 +2,7 @@ def version_list():
   """
   Returns a list of Testkube versions pulled to local folder.
   """
-  charts_list = local('ls -A ../charts | grep -i "325" | tr -d "tke-"')
+  charts_list = local('ls -A ../charts | grep -i "tke-" | tr -d "tke-"')
   return str(charts_list).strip().split("\n")
 
 def deploy_testkube_instances(version):

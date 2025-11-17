@@ -2,7 +2,7 @@ def oss_version_list():
   """
   Returns a list of Testkube OSS versions pulled to local folder.
   """
-  charts_list = local('ls -A ../charts | tr -d "tkoss-"')
+  charts_list = local('ls -A ../charts | grep -i "tkoss-" | tr -d "tkoss-"')
   return str(charts_list).strip().split("\n")
 
 def deploy_testkube_oss_instances(version):
@@ -19,15 +19,17 @@ metadata:
   k8s_yaml([blob(testkube_namespace)])
   print("Building MongoDB latest docker image for Testkube OSS version: %s" % version)
   docker_build(
-    'testkube/mongodb:latest',
+    'testkube/mongodb:8.0.15',
     context='.',
-    dockerfile='minio-release.dockerfile'
+    dockerfile='mongo-8.dockerfile'
   )
   print("Deploying MongoDB for Testkube OSS version: %s" % version)
   yaml = helm('./helm', name='testkube-mongodb', namespace='testkube-oss-%s' % version.replace(".", "-"), values='./mongo.values.yaml')
   k8s_yaml(yaml)
   print("Deploying Testkube OSS version: %s" % version)
-  yaml = helm('../charts/tkoss-%s/testkube' % version, name='testkube', namespace='testkube-oss-%s' % version.replace(".", "-"))
+  yaml = helm('../charts/tkoss-%s/testkube' % version, name='testkube', namespace='testkube-oss-%s' % version.replace(".", "-"), set=[
+    "mongodb.enabled=false",
+  ])
   k8s_yaml(yaml)
 
 # TODO: find a way to make grouping work with multiple versions or testkube
