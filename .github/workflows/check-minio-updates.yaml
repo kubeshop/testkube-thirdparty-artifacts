@@ -5,6 +5,12 @@ on:
     # Ejecutar cada domingo a las 00:00 UTC
     - cron: '0 0 * * 0'
   workflow_dispatch:  # Permite ejecución manual
+    inputs:
+      dry_run:
+        description: 'Solo verificar sin crear PR (dry-run)'
+        required: false
+        default: 'false'
+        type: boolean
 
 concurrency:
   group: check-minio-updates
@@ -34,8 +40,15 @@ jobs:
           cd minio/scripts
           chmod +x check-and-update-minio.sh
           
+          # Determinar si es dry-run (manual con input o scheduled siempre actualiza)
+          DRY_RUN_FLAG=""
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ] && [ "${{ inputs.dry_run }}" == "true" ]; then
+            DRY_RUN_FLAG="--dry-run"
+            echo "Running in dry-run mode (manual trigger)"
+          fi
+          
           # Ejecutar script en modo dry-run primero para verificar
-          if ./check-and-update-minio.sh --dry-run 2>&1 | tee /tmp/check-output.log; then
+          if ./check-and-update-minio.sh $DRY_RUN_FLAG 2>&1 | tee /tmp/check-output.log; then
             echo "has_update=true" >> "$GITHUB_OUTPUT"
             # Extraer versiones del output
             CURRENT_VERSION=$(grep "Versión actual" /tmp/check-output.log | awk '{print $NF}')
@@ -50,21 +63,28 @@ jobs:
             echo "has_update=false" >> "$GITHUB_OUTPUT"
             echo "No hay actualización disponible"
           fi
+          
+          # Si es dry-run manual, no crear PR
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ] && [ "${{ inputs.dry_run }}" == "true" ]; then
+            echo "create_pr=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "create_pr=${{ steps.check-updates.outputs.has_update }}" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Update MinIO version and create PR
-        if: steps.check-updates.outputs.has_update == 'true'
+        if: steps.check-updates.outputs.create_pr == 'true'
         run: |
           cd minio/scripts
           ./check-and-update-minio.sh --update-files
 
       - name: Configure Git
-        if: steps.check-updates.outputs.has_update == 'true'
+        if: steps.check-updates.outputs.create_pr == 'true'
         run: |
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
 
       - name: Create Pull Request
-        if: steps.check-updates.outputs.has_update == 'true'
+        if: steps.check-updates.outputs.create_pr == 'true'
         uses: peter-evans/create-pull-request@v5
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -109,8 +129,13 @@ jobs:
       - name: Output result
         run: |
           if [ "${{ steps.check-updates.outputs.has_update }}" == "true" ]; then
-            echo "✅ New MinIO version detected: ${{ steps.check-updates.outputs.latest_version }}"
-            echo "✅ Pull Request created successfully"
+            if [ "${{ steps.check-updates.outputs.create_pr }}" == "true" ]; then
+              echo "✅ New MinIO version detected: ${{ steps.check-updates.outputs.latest_version }}"
+              echo "✅ Pull Request created successfully"
+            else
+              echo "✅ New MinIO version detected: ${{ steps.check-updates.outputs.latest_version }}"
+              echo "ℹ️  Dry-run mode: No PR created. Run without dry-run to create PR."
+            fi
           else
             echo "ℹ️  MinIO is up to date. No update needed."
           fi
