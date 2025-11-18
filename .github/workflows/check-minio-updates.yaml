@@ -1,0 +1,117 @@
+name: Check MinIO Updates
+
+on:
+  schedule:
+    # Ejecutar cada domingo a las 00:00 UTC
+    - cron: '0 0 * * 0'
+  workflow_dispatch:  # Permite ejecución manual
+
+concurrency:
+  group: check-minio-updates
+  cancel-in-progress: false
+
+jobs:
+  check-updates:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write  # Necesario para crear PR
+      pull-requests: write  # Necesario para crear PR
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y jq curl
+
+      - name: Check for MinIO updates
+        id: check-updates
+        run: |
+          cd minio/scripts
+          chmod +x check-and-update-minio.sh
+          
+          # Ejecutar script en modo dry-run primero para verificar
+          if ./check-and-update-minio.sh --dry-run 2>&1 | tee /tmp/check-output.log; then
+            echo "has_update=true" >> "$GITHUB_OUTPUT"
+            # Extraer versiones del output
+            CURRENT_VERSION=$(grep "Versión actual" /tmp/check-output.log | awk '{print $NF}')
+            LATEST_VERSION=$(grep "Versión oficial" /tmp/check-output.log | tail -1 | awk '{print $NF}')
+            echo "current_version=$CURRENT_VERSION" >> "$GITHUB_OUTPUT"
+            echo "latest_version=$LATEST_VERSION" >> "$GITHUB_OUTPUT"
+            
+            # Extraer versión semántica para el título del PR
+            SEMANTIC_VERSION=$(echo "$LATEST_VERSION" | sed -E 's/RELEASE\.([0-9]{4})-([0-9]{2}).*/\1.\2/')
+            echo "semantic_version=$SEMANTIC_VERSION" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_update=false" >> "$GITHUB_OUTPUT"
+            echo "No hay actualización disponible"
+          fi
+
+      - name: Update MinIO version and create PR
+        if: steps.check-updates.outputs.has_update == 'true'
+        run: |
+          cd minio/scripts
+          ./check-and-update-minio.sh --update-files
+
+      - name: Configure Git
+        if: steps.check-updates.outputs.has_update == 'true'
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+
+      - name: Create Pull Request
+        if: steps.check-updates.outputs.has_update == 'true'
+        uses: peter-evans/create-pull-request@v5
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: |
+            chore: Update MinIO to version ${{ steps.check-updates.outputs.latest_version }}
+            
+            Automated update from Docker Hub.
+            - Current version: ${{ steps.check-updates.outputs.current_version }}
+            - New version: ${{ steps.check-updates.outputs.latest_version }}
+          title: "chore: Update MinIO to version ${{ steps.check-updates.outputs.semantic_version }}"
+          body: |
+            ## Automated MinIO Version Update
+            
+            This PR was automatically created by the weekly MinIO update check workflow.
+            
+            ### Changes
+            - Updated MinIO server version from `${{ steps.check-updates.outputs.current_version }}` to `${{ steps.check-updates.outputs.latest_version }}`
+            - Updated Dockerfile (`MINIO_SERVER_VERSION`)
+            - Updated Helm Chart (`appVersion` and `version`)
+            - Updated values.yaml (`image.tag`, `clientImage.tag`)
+            
+            ### Version Information
+            - **Current Version:** `${{ steps.check-updates.outputs.current_version }}`
+            - **New Version:** `${{ steps.check-updates.outputs.latest_version }}`
+            - **Semantic Version:** `${{ steps.check-updates.outputs.semantic_version }}`
+            
+            ### Next Steps
+            - [ ] Review the changes
+            - [ ] Wait for regression tests to pass
+            - [ ] Merge PR to trigger build and publication
+            
+            ---
+            *This PR was created automatically by [check-minio-updates workflow](.github/workflows/check-minio-updates.yaml)*
+          branch: update/minio-${{ steps.check-updates.outputs.semantic_version }}
+          delete-branch: true
+          labels: |
+            automated
+            minio
+            dependencies
+          draft: false
+
+      - name: Output result
+        run: |
+          if [ "${{ steps.check-updates.outputs.has_update }}" == "true" ]; then
+            echo "✅ New MinIO version detected: ${{ steps.check-updates.outputs.latest_version }}"
+            echo "✅ Pull Request created successfully"
+          else
+            echo "ℹ️  MinIO is up to date. No update needed."
+          fi
+
