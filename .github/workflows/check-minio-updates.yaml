@@ -2,12 +2,12 @@ name: Check MinIO Updates
 
 on:
   schedule:
-    # Ejecutar cada domingo a las 00:00 UTC
+    # Run every Sunday at 00:00 UTC
     - cron: '0 0 * * 0'
-  workflow_dispatch:  # Permite ejecución manual
+  workflow_dispatch:  # Allow manual execution
     inputs:
       dry_run:
-        description: 'Solo verificar sin crear PR (dry-run)'
+        description: 'Check only without creating PR (dry-run)'
         required: false
         default: 'false'
         type: boolean
@@ -20,8 +20,8 @@ jobs:
   check-updates:
     runs-on: ubuntu-latest
     permissions:
-      contents: write  # Necesario para crear PR
-      pull-requests: write  # Necesario para crear PR
+      contents: write  # Required to create PR
+      pull-requests: write  # Required to create PR
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3
@@ -40,31 +40,31 @@ jobs:
           cd minio/scripts
           chmod +x check-and-update-minio.sh
           
-          # Determinar si es dry-run (manual con input o scheduled siempre actualiza)
+          # Determine if dry-run mode (manual with input or scheduled always updates)
           DRY_RUN_FLAG=""
           if [ "${{ github.event_name }}" == "workflow_dispatch" ] && [ "${{ inputs.dry_run }}" == "true" ]; then
             DRY_RUN_FLAG="--dry-run"
             echo "Running in dry-run mode (manual trigger)"
           fi
           
-          # Ejecutar script en modo dry-run primero para verificar
+          # Run script in dry-run mode first to check
           if ./check-and-update-minio.sh $DRY_RUN_FLAG 2>&1 | tee /tmp/check-output.log; then
             echo "has_update=true" >> "$GITHUB_OUTPUT"
-            # Extraer versiones del output
-            CURRENT_VERSION=$(grep "Versión actual" /tmp/check-output.log | awk '{print $NF}')
-            LATEST_VERSION=$(grep "Versión oficial" /tmp/check-output.log | tail -1 | awk '{print $NF}')
+            # Extract versions from output (search for both Spanish and English text for compatibility)
+            CURRENT_VERSION=$(grep -E "Versión actual|Current version" /tmp/check-output.log | awk '{print $NF}')
+            LATEST_VERSION=$(grep -E "Versión oficial|Latest version" /tmp/check-output.log | tail -1 | awk '{print $NF}')
             echo "current_version=$CURRENT_VERSION" >> "$GITHUB_OUTPUT"
             echo "latest_version=$LATEST_VERSION" >> "$GITHUB_OUTPUT"
             
-            # Extraer versión semántica para el título del PR
+            # Extract semantic version for PR title
             SEMANTIC_VERSION=$(echo "$LATEST_VERSION" | sed -E 's/RELEASE\.([0-9]{4})-([0-9]{2}).*/\1.\2/')
             echo "semantic_version=$SEMANTIC_VERSION" >> "$GITHUB_OUTPUT"
           else
             echo "has_update=false" >> "$GITHUB_OUTPUT"
-            echo "No hay actualización disponible"
+            echo "No update available"
           fi
           
-          # Si es dry-run manual, no crear PR
+          # If manual dry-run, don't create PR
           if [ "${{ github.event_name }}" == "workflow_dispatch" ] && [ "${{ inputs.dry_run }}" == "true" ]; then
             echo "create_pr=false" >> "$GITHUB_OUTPUT"
           else
@@ -83,6 +83,28 @@ jobs:
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
 
+      - name: Generate AI-powered PR description
+        if: steps.check-updates.outputs.create_pr == 'true'
+        id: ai-description
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          cd minio/scripts
+          chmod +x generate-pr-description.sh
+          
+          # Generate PR description with AI
+          ./generate-pr-description.sh \
+            --current-version "${{ steps.check-updates.outputs.current_version }}" \
+            --new-version "${{ steps.check-updates.outputs.latest_version }}" \
+            --output /tmp/pr-description.md
+          
+          # Save output for next step
+          {
+            echo 'pr_body<<EOFMARKER'
+            cat /tmp/pr-description.md
+            echo 'EOFMARKER'
+          } >> "$GITHUB_OUTPUT"
+
       - name: Create Pull Request
         if: steps.check-updates.outputs.create_pr == 'true'
         uses: peter-evans/create-pull-request@v5
@@ -95,35 +117,14 @@ jobs:
             - Current version: ${{ steps.check-updates.outputs.current_version }}
             - New version: ${{ steps.check-updates.outputs.latest_version }}
           title: "chore: Update MinIO to version ${{ steps.check-updates.outputs.semantic_version }}"
-          body: |
-            ## Automated MinIO Version Update
-            
-            This PR was automatically created by the weekly MinIO update check workflow.
-            
-            ### Changes
-            - Updated MinIO server version from `${{ steps.check-updates.outputs.current_version }}` to `${{ steps.check-updates.outputs.latest_version }}`
-            - Updated Dockerfile (`MINIO_SERVER_VERSION`)
-            - Updated Helm Chart (`appVersion` and `version`)
-            - Updated values.yaml (`image.tag`, `clientImage.tag`)
-            
-            ### Version Information
-            - **Current Version:** `${{ steps.check-updates.outputs.current_version }}`
-            - **New Version:** `${{ steps.check-updates.outputs.latest_version }}`
-            - **Semantic Version:** `${{ steps.check-updates.outputs.semantic_version }}`
-            
-            ### Next Steps
-            - [ ] Review the changes
-            - [ ] Wait for regression tests to pass
-            - [ ] Merge PR to trigger build and publication
-            
-            ---
-            *This PR was created automatically by [check-minio-updates workflow](.github/workflows/check-minio-updates.yaml)*
+          body: ${{ steps.ai-description.outputs.pr_body }}
           branch: update/minio-${{ steps.check-updates.outputs.semantic_version }}
           delete-branch: true
           labels: |
             automated
             minio
             dependencies
+            ai-generated
           draft: false
 
       - name: Output result
