@@ -1,0 +1,9 @@
+# kubectl Service Configuration
+name: kubectl
+display_name: kubectl
+source: dockerhub
+source_image: alpine/kubectl
+version_pattern: "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+dockerfile: kubectl-release.dockerfile
+gar_image: us-east1-docker.pkg.dev/testkube-cloud-372110/testkube/kubectl
+

@@ -1,0 +1,9 @@
+# PostgreSQL Service Configuration
+name: postgresql
+display_name: PostgreSQL
+source: dockerhub
+source_image: postgres
+version_pattern: "^[0-9]+\\.[0-9]+$"
+dockerfile: postgresql-release.dockerfile
+gar_image: us-east1-docker.pkg.dev/testkube-cloud-372110/testkube/postgresql
+
