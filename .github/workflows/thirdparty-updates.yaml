@@ -226,7 +226,7 @@ jobs:
           
           # Deploy with Tilt
           cd minio
-          tilt ci -f ci.tiltfile --timeout 10m
+          tilt ci -f oss.tiltfile --timeout 10m
           cd ..
           
           # Wait for deployments
