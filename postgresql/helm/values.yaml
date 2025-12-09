@@ -24,6 +24,16 @@ global:
   security:
     ## @param global.security.allowInsecureImages Allows skipping image verification
     allowInsecureImages: false
+  containerSecurityContext: {}
+  podSecurityContext: {}
+  # -- Global Tolerations
+  tolerations: []
+  # -- Global NodeSelector
+  nodeSelector: {}
+  # -- Global Pod Topology Spread Constraints
+  topologySpreadConstraints: []
+  # -- Global Affinity
+  affinity: {}
   postgresql:
     ## @param global.postgresql.auth.postgresPassword Password for the "postgres" admin user (overrides `auth.postgresPassword`)
     ## @param global.postgresql.auth.username Name for a custom user to create (overrides `auth.username`)
@@ -1384,7 +1394,7 @@ backup:
       ##
       enabled: true
     storage:
-      ## @param backup.cronjob.storage.enabled Enable using a `PersistentVolumeClaim` as backup data volume 
+      ## @param backup.cronjob.storage.enabled Enable using a `PersistentVolumeClaim` as backup data volume
       ##
       enabled: true
       ## @param backup.cronjob.storage.existingClaim Provide an existing `PersistentVolumeClaim` (only when `architecture=standalone`)

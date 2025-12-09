@@ -17,9 +17,10 @@ dependencies:
     version: 2.26.0
     repository: "file://../../common"
 maintainers:
-- name: Testkube
-  url: https://github.com/kubeshop/testkube-thirdparty-artifacts
+  - name: Testkube
+    url: https://github.com/kubeshop/testkube-thirdparty-artifacts
 name: postgresql
 sources:
-- https://github.com/kubeshop/testkube-thirdparty-artifacts/tree/main/postgresql
-version: 0.1.0
+  - https://github.com/kubeshop/testkube-thirdparty-artifacts/tree/main/postgresql
+  - https://github.com/bitnami/containers/blob/main/bitnami/postgresql/18/debian-12/Dockerfile
+version: 0.1.1
