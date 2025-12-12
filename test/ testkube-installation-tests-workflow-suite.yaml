@@ -1,0 +1,23 @@
+kind: TestWorkflow
+apiVersion: testworkflows.testkube.io/v1
+metadata:
+  name: testkube-installation-tests-workflow-suite
+  namespace: testkube-agent
+  labels:
+    argocd.argoproj.io/instance: testkube-dev-agent
+    core-tests: workflows-suite
+    tool: testkube
+    type: suite
+spec:
+  steps:
+  - execute:
+      parallelism: 1
+      workflows:
+      - name: enterprise-installation-test
+      - name: enterprise-installation-multi-namespace
+      - name: oss-standalone-installation-test
+status:
+  health:
+    passRate: 1
+    flipRate: 0
+    overallHealth: 1
