@@ -1,0 +1,30 @@
+kind: TestWorkflow
+apiVersion: testworkflows.testkube.io/v1
+metadata:
+  name: oss-standalone-installation-test-copy-expected-fail
+  namespace: testkube-agent
+  labels:
+    core-tests: installation
+    test-workflow-templates: "yes"
+    tool: testkube-oss
+spec:
+  use:
+  - name: setup-dind-kind-cluster-template
+  system:
+    pureByDefault: true
+  content:
+    git:
+      uri: https://github.com/kubeshop/testkube
+      revision: main
+      paths:
+      - test/k6/crd-workflow/smoke.yaml
+  container:
+    workingDir: /data/repo/test/k6/crd-workflow
+    resources:
+      requests:
+        cpu: 500m
+        memory: 256Mi
+  steps:
+  - name: Install Testkube OSS
+    shell: exit 1
+status: {}

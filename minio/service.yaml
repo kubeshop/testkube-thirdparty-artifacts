@@ -1,0 +1,9 @@
+# MinIO Service Configuration
+name: minio
+display_name: MinIO
+source: dockerhub
+source_image: minio/minio
+version_pattern: "RELEASE\\.[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}-[0-9]{2}-[0-9]{2}Z"
+dockerfile: minio-release.dockerfile
+gar_image: us-east1-docker.pkg.dev/testkube-cloud-372110/testkube/minio
+

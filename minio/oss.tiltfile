@@ -1,36 +1,88 @@
-def oss_version_list():
-  """
-  Returns a list of Testkube OSS versions pulled to local folder.
-  """
-  charts_list = local('ls -A ../charts | grep -i "tkoss-" | tr -d "tkoss-"')
-  return str(charts_list).strip().split("\n")
+# OSS Tiltfile for testing MinIO with Testkube OSS
+# Used for both local development and CI testing
+#
+# Usage:
+#   Local:  tilt up -f oss.tiltfile
+#   CI:     tilt ci -f oss.tiltfile --timeout 10m
+#
+# NOTE: In CI, Docker image is pre-built and loaded into Kind before running Tilt
 
-def deploy_testkube_oss_instances(version):
-  """
-  Deploys the Testkube OSS and MongoDB instance using Helm charts into this folder.
-  """
-  testkube_namespace = """
-kind: Namespace
+# Get Testkube version from environment or use default
+TESTKUBE_VERSION = os.getenv('TESTKUBE_VERSION', '2.4.3')
+
+# Detect if running in CI (Kind cluster)
+IS_CI = os.getenv('CI', 'false') == 'true' or os.getenv('GITHUB_ACTIONS', 'false') == 'true'
+
+# Create namespace
+k8s_yaml(blob("""
 apiVersion: v1
+kind: Namespace
 metadata:
-  name: testkube-oss-%s
-  """ % version.replace(".", "-")
-  print("Creating namespace: %s" % testkube_namespace)
-  k8s_yaml([blob(testkube_namespace)])
-  print("Building Minio latest docker image for Testkube OSS version: %s" % version)
+  name: testkube
+"""))
+
+# Build MinIO image
+# In CI: image is pre-built and loaded into Kind (skip docker_build)
+# In Local: build with Tilt
+if not IS_CI:
+  print("Building MinIO image locally...")
   docker_build(
     'testkube/minio:latest',
     context='.',
     dockerfile='minio-release.dockerfile'
   )
-  print("Deploying Minio for Testkube OSS version: %s" % version)
-  yaml = helm('./helm', name='testkube-minio', namespace='testkube-oss-%s' % version.replace(".", "-"), values='./minio.values.yaml')
-  k8s_yaml(yaml)
-  print("Deploying Testkube OSS version: %s" % version)
-  yaml = helm('../charts/tkoss-%s/testkube' % version, name='testkube', namespace='testkube-oss-%s' % version.replace(".", "-"), set=[
-    "testkube-api.minio.enabled=false",
-  ])
-  k8s_yaml(yaml)
+else:
+  print("CI mode: using pre-built MinIO image")
 
-# TODO: find a way to make grouping work with multiple versions or testkube
-[deploy_testkube_oss_instances(version) for version in oss_version_list()]
+# Deploy MinIO
+print("Deploying MinIO...")
+minio_yaml = helm(
+  './helm',
+  name='testkube-minio',
+  namespace='testkube',
+  values=['./minio.values.yaml']
+)
+k8s_yaml(minio_yaml)
+
+# Deploy Testkube OSS configured to use our MinIO
+print("Deploying Testkube OSS version: %s" % TESTKUBE_VERSION)
+testkube_yaml = helm(
+  '../charts/testkube',
+  name='testkube',
+  namespace='testkube',
+  set=[
+    # Disable built-in MinIO
+    'testkube-api.minio.enabled=false',
+    # Configure storage to use our MinIO (include port in endpoint)
+    'testkube-api.storage.endpoint=testkube-minio:9000',
+    'testkube-api.storage.accessKeyId=minio',
+    'testkube-api.storage.accessKey=minio123',
+    'testkube-api.storage.SSL=false',
+    'testkube-api.storage.scrapperEnabled=true',
+    'testkube-api.storage.compressArtifacts=true',
+    # Logs storage
+    'testkube-api.logs.storage=minio',
+    # Reduce resource requests for CI (GitHub Actions has 2 CPUs)
+    'testkube-api.resources.requests.cpu=100m',
+    'testkube-api.resources.requests.memory=256Mi',
+    'mongodb.resources.requests.cpu=100m',
+    'mongodb.resources.requests.memory=256Mi',
+    'testkube-api.nats.resources.requests.cpu=50m',
+    'testkube-api.nats.resources.requests.memory=64Mi',
+  ]
+)
+k8s_yaml(testkube_yaml)
+
+# Track resources
+# In CI: skip readiness checks (we verify manually with kubectl)
+# In Local: use default readiness
+if IS_CI:
+  k8s_resource(workload='testkube-minio', labels=['minio'], pod_readiness='ignore')
+  k8s_resource(workload='testkube-api-server', labels=['testkube'], pod_readiness='ignore')
+  k8s_resource(workload='testkube-mongodb', labels=['testkube'], pod_readiness='ignore')
+  k8s_resource(workload='testkube-nats', labels=['testkube'], pod_readiness='ignore')
+else:
+  k8s_resource(workload='testkube-minio', labels=['minio'])
+  k8s_resource(workload='testkube-api-server', labels=['testkube'])
+  k8s_resource(workload='testkube-mongodb', labels=['testkube'])
+  k8s_resource(workload='testkube-nats', labels=['testkube'])
