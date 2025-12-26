@@ -409,11 +409,12 @@ jobs:
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
-          chmod +x scripts/check-version.sh minio/scripts/generate-pr-description.sh
+          chmod +x scripts/check-version.sh scripts/generate-pr-description.sh
           scripts/check-version.sh minio --update-files
           
-          # Generate PR description
-          minio/scripts/generate-pr-description.sh \
+          # Generate PR description with AI
+          scripts/generate-pr-description.sh \
+            --service minio \
             --current-version "${{ needs.check-all-updates.outputs.minio_current }}" \
             --new-version "${{ needs.check-all-updates.outputs.minio_latest }}" \
             --output /tmp/minio-pr.md
@@ -436,8 +437,17 @@ jobs:
       
       - name: Create MongoDB PR
         if: needs.check-all-updates.outputs.mongodb_update == 'true' && needs.test-mongodb.outputs.result == 'success'
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
           scripts/check-version.sh mongodb --update-files
+          
+          # Generate PR description with AI
+          scripts/generate-pr-description.sh \
+            --service mongodb \
+            --current-version "${{ needs.check-all-updates.outputs.mongodb_current }}" \
+            --new-version "${{ needs.check-all-updates.outputs.mongodb_latest }}" \
+            --output /tmp/mongodb-pr.md
       
       - name: Create MongoDB Pull Request
         if: needs.check-all-updates.outputs.mongodb_update == 'true' && needs.test-mongodb.outputs.result == 'success'
@@ -446,12 +456,7 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           commit-message: "chore: Update MongoDB to ${{ needs.check-all-updates.outputs.mongodb_latest }}"
           title: "chore: Update MongoDB to ${{ needs.check-all-updates.outputs.mongodb_latest }}"
-          body: |
-            ## 🚀 MongoDB Update
-            
-            - **Current:** `${{ needs.check-all-updates.outputs.mongodb_current }}`
-            - **New:** `${{ needs.check-all-updates.outputs.mongodb_latest }}`
-            - **Tests:** ✅ Passed
+          body-path: /tmp/mongodb-pr.md
           branch: update/mongodb-${{ needs.check-all-updates.outputs.mongodb_latest }}
           delete-branch: true
           labels: |
@@ -462,8 +467,17 @@ jobs:
       
       - name: Create PostgreSQL PR
         if: needs.check-all-updates.outputs.postgresql_update == 'true' && needs.test-postgresql.outputs.result == 'success'
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
           scripts/check-version.sh postgresql --update-files
+          
+          # Generate PR description with AI
+          scripts/generate-pr-description.sh \
+            --service postgresql \
+            --current-version "${{ needs.check-all-updates.outputs.postgresql_current }}" \
+            --new-version "${{ needs.check-all-updates.outputs.postgresql_latest }}" \
+            --output /tmp/postgresql-pr.md
       
       - name: Create PostgreSQL Pull Request
         if: needs.check-all-updates.outputs.postgresql_update == 'true' && needs.test-postgresql.outputs.result == 'success'
@@ -472,12 +486,7 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           commit-message: "chore: Update PostgreSQL to ${{ needs.check-all-updates.outputs.postgresql_latest }}"
           title: "chore: Update PostgreSQL to ${{ needs.check-all-updates.outputs.postgresql_latest }}"
-          body: |
-            ## 🚀 PostgreSQL Update
-            
-            - **Current:** `${{ needs.check-all-updates.outputs.postgresql_current }}`
-            - **New:** `${{ needs.check-all-updates.outputs.postgresql_latest }}`
-            - **Tests:** ✅ Passed
+          body-path: /tmp/postgresql-pr.md
           branch: update/postgresql-${{ needs.check-all-updates.outputs.postgresql_latest }}
           delete-branch: true
           labels: |
@@ -488,8 +497,17 @@ jobs:
       
       - name: Create kubectl PR
         if: needs.check-all-updates.outputs.kubectl_update == 'true' && needs.test-kubectl.outputs.result == 'success'
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
           scripts/check-version.sh kubectl --update-files
+          
+          # Generate PR description with AI
+          scripts/generate-pr-description.sh \
+            --service kubectl \
+            --current-version "${{ needs.check-all-updates.outputs.kubectl_current }}" \
+            --new-version "${{ needs.check-all-updates.outputs.kubectl_latest }}" \
+            --output /tmp/kubectl-pr.md
       
       - name: Create kubectl Pull Request
         if: needs.check-all-updates.outputs.kubectl_update == 'true' && needs.test-kubectl.outputs.result == 'success'
@@ -498,12 +516,7 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           commit-message: "chore: Update kubectl to ${{ needs.check-all-updates.outputs.kubectl_latest }}"
           title: "chore: Update kubectl to ${{ needs.check-all-updates.outputs.kubectl_latest }}"
-          body: |
-            ## 🚀 kubectl Update
-            
-            - **Current:** `${{ needs.check-all-updates.outputs.kubectl_current }}`
-            - **New:** `${{ needs.check-all-updates.outputs.kubectl_latest }}`
-            - **Tests:** ✅ Passed
+          body-path: /tmp/kubectl-pr.md
           branch: update/kubectl-${{ needs.check-all-updates.outputs.kubectl_latest }}
           delete-branch: true
           labels: |
