@@ -205,7 +205,8 @@ update_dockerfile() {
       sed -i.bak "s|^ENV MINIO_SERVER_VERSION=.*|ENV MINIO_SERVER_VERSION=${new_version}|" "$dockerfile"
       ;;
     mongodb)
-      sed -i.bak "s|^ARG MONGODB_VERSION=.*|ARG MONGODB_VERSION=${new_version}|" "$dockerfile"
+      # Update FROM mongo:X.Y.Z line directly (ARG before FROM has issues with some build drivers)
+      sed -i.bak "s|^FROM mongo:.*|FROM mongo:${new_version}|" "$dockerfile"
       ;;
     postgresql)
       sed -i.bak "s|^ARG POSTGRESQL_VERSION=.*|ARG POSTGRESQL_VERSION=${new_version}|" "$dockerfile"
