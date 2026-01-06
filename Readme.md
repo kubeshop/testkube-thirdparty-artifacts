@@ -16,19 +16,55 @@ ensuring that Testkube provides secure and reliable versions of these platforms 
 
 * [Minio](./minio/).
 * [MongoDB](./mongodb/).
-* [PostgreSQL](./postgres/).
+* [PostgreSQL](./postgresql/).
 * [Kubectl](./kubectl/).
 
 ## Automation overview
 
-Every change starts in a feature branch where `.github/workflows/checks.yaml` builds candidate images with Depot and runs `helm lint` to validate the charts. Once merged to `main`, the trunk-based workflows take over: `.github/workflows/build-images.yaml` authenticates to Google Artifact Registry, generates Docker metadata, and publishes the Minio/MongoDB release images, while `.github/workflows/build-helm-charts.yaml` packages the corresponding Helm charts and pushes them to the OCI registry. Tag pushes (for example `minio-2025.10`) reuse the same pipelines but only build the target that matches the tag prefix and reuse the literal tag in the published image and chart versions. This keeps feature branch validation and trunk releases fully automated and consistent.
+### Workflows
 
-Allowed tags prefixes:
+| Workflow | Trigger | Purpose |
+|----------|---------|---------|
+| `checks.yaml` | Push to feature branches | Builds candidate images with Depot and runs `helm lint` |
+| `thirdparty-updates.yaml` | Daily cron | Checks for new versions, runs tests, creates PRs |
+| `create-version-tag.yaml` | PR merge with `automated` label | Creates version tags (e.g., `minio-RELEASE.xxx`) |
+| `build-images.yaml` | Push to `main` or tags | Builds and publishes Docker images to GAR |
 
-* minio-
-* mongodb-
+### Update Flow
+
+```
+Daily Cron
+    │
+    ▼
+Check for new versions (Docker Hub)
+    │
+    ▼
+Run tests in Kind cluster
+    │
+    ▼
+Create PR with AI-generated description
+    │
+    ▼
+Review & Merge
+    │
+    ├──► build-images.yaml (temp-main tag)
+    │
+    └──► create-version-tag.yaml
+              │
+              ▼
+         Creates tag: minio-RELEASE.xxx
+              │
+              ▼
+         build-images.yaml (production tag)
+```
+
+### Supported Tag Prefixes
+
+* `minio-`
+* `mongodb-`
+* `postgresql-`
+* `kubectl-`
 
 ## Processes to manage artifacts into this repository
 
 [TODO]
-
