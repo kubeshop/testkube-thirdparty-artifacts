@@ -29,6 +29,7 @@ ensuring that Testkube provides secure and reliable versions of these platforms 
 | `thirdparty-updates.yaml` | Daily cron | Checks for new versions, runs tests, creates PRs |
 | `create-version-tag.yaml` | PR merge with `automated` label | Creates version tags (e.g., `minio-RELEASE.xxx`) |
 | `build-images.yaml` | Push to `main` or tags | Builds and publishes Docker images to GAR |
+| `build-helm-charts.yaml` | Push to `main` | Packages and publishes Helm charts to GAR |
 
 ### Update Flow
 
@@ -48,6 +49,8 @@ Create PR with AI-generated description
 Review & Merge
     │
     ├──► build-images.yaml (temp-main tag)
+    │
+    ├──► build-helm-charts.yaml (publishes charts to GAR)
     │
     └──► create-version-tag.yaml
               │
