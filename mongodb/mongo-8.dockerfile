@@ -47,13 +47,13 @@ RUN --mount=type=cache,target="$GOMODCACHE" \
     go build -o /opt/bitnami/common/bin/render-template *.go
 
 # Stage 3: Final image based on official MongoDB
+# MONGODB_VERSION is updated by scripts/check-version.sh
 FROM mongo:8.0.15
 
 ARG TARGETARCH
 
 ENV HOME="/" \
     OS_ARCH="${TARGETARCH:-amd64}" \
-    MONGO_SERVER_VERSION=8.0.15 \
     APP_NAME=mongodb
 
 SHELL ["/bin/bash", "-o", "errexit", "-o", "nounset", "-o", "pipefail", "-c"]

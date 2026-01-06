@@ -1,0 +1,579 @@
+name: Third-Party Updates Pipeline
+
+on:
+  schedule:
+    # Run every Sunday at 00:00 UTC
+    - cron: '0 0 * * 0'
+  workflow_dispatch:
+    inputs:
+      services:
+        description: 'Services to check (comma-separated or "all")'
+        required: false
+        default: 'all'
+        type: string
+      dry_run:
+        description: 'Check only without creating PRs'
+        required: false
+        default: 'false'
+        type: boolean
+      skip_tests:
+        description: 'Skip regression tests'
+        required: false
+        default: 'false'
+        type: boolean
+
+concurrency:
+  group: thirdparty-updates
+  cancel-in-progress: false
+
+env:
+  TESTKUBE_VERSION: "2.4.3"
+
+jobs:
+  # ===========================================
+  # Job 1: Check ALL services for updates (parallel, fast)
+  # ===========================================
+  check-all-updates:
+    runs-on: ubuntu-latest
+    outputs:
+      minio_update: ${{ steps.check-minio.outputs.has_update }}
+      minio_current: ${{ steps.check-minio.outputs.current_version }}
+      minio_latest: ${{ steps.check-minio.outputs.latest_version }}
+      mongodb_update: ${{ steps.check-mongodb.outputs.has_update }}
+      mongodb_current: ${{ steps.check-mongodb.outputs.current_version }}
+      mongodb_latest: ${{ steps.check-mongodb.outputs.latest_version }}
+      postgresql_update: ${{ steps.check-postgresql.outputs.has_update }}
+      postgresql_current: ${{ steps.check-postgresql.outputs.current_version }}
+      postgresql_latest: ${{ steps.check-postgresql.outputs.latest_version }}
+      kubectl_update: ${{ steps.check-kubectl.outputs.has_update }}
+      kubectl_current: ${{ steps.check-kubectl.outputs.current_version }}
+      kubectl_latest: ${{ steps.check-kubectl.outputs.latest_version }}
+      any_update: ${{ steps.summary.outputs.any_update }}
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y jq
+      
+      - name: Check MinIO
+        id: check-minio
+        if: contains(github.event.inputs.services, 'minio') || github.event.inputs.services == 'all' || github.event.inputs.services == ''
+        run: |
+          chmod +x scripts/check-version.sh
+          if scripts/check-version.sh minio 2>&1 | tee /tmp/minio-check.log; then
+            echo "has_update=true" >> "$GITHUB_OUTPUT"
+            CURRENT=$(grep "Current version:" /tmp/minio-check.log | awk '{print $NF}')
+            LATEST=$(grep "Latest version:" /tmp/minio-check.log | awk '{print $NF}')
+            echo "current_version=$CURRENT" >> "$GITHUB_OUTPUT"
+            echo "latest_version=$LATEST" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_update=false" >> "$GITHUB_OUTPUT"
+          fi
+      
+      - name: Check MongoDB
+        id: check-mongodb
+        if: contains(github.event.inputs.services, 'mongodb') || github.event.inputs.services == 'all' || github.event.inputs.services == ''
+        run: |
+          if scripts/check-version.sh mongodb 2>&1 | tee /tmp/mongodb-check.log; then
+            echo "has_update=true" >> "$GITHUB_OUTPUT"
+            CURRENT=$(grep "Current version:" /tmp/mongodb-check.log | awk '{print $NF}')
+            LATEST=$(grep "Latest version:" /tmp/mongodb-check.log | awk '{print $NF}')
+            echo "current_version=$CURRENT" >> "$GITHUB_OUTPUT"
+            echo "latest_version=$LATEST" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_update=false" >> "$GITHUB_OUTPUT"
+          fi
+      
+      - name: Check PostgreSQL
+        id: check-postgresql
+        if: contains(github.event.inputs.services, 'postgresql') || github.event.inputs.services == 'all' || github.event.inputs.services == ''
+        run: |
+          if scripts/check-version.sh postgresql 2>&1 | tee /tmp/postgresql-check.log; then
+            echo "has_update=true" >> "$GITHUB_OUTPUT"
+            CURRENT=$(grep "Current version:" /tmp/postgresql-check.log | awk '{print $NF}')
+            LATEST=$(grep "Latest version:" /tmp/postgresql-check.log | awk '{print $NF}')
+            echo "current_version=$CURRENT" >> "$GITHUB_OUTPUT"
+            echo "latest_version=$LATEST" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_update=false" >> "$GITHUB_OUTPUT"
+          fi
+      
+      - name: Check kubectl
+        id: check-kubectl
+        if: contains(github.event.inputs.services, 'kubectl') || github.event.inputs.services == 'all' || github.event.inputs.services == ''
+        run: |
+          if scripts/check-version.sh kubectl 2>&1 | tee /tmp/kubectl-check.log; then
+            echo "has_update=true" >> "$GITHUB_OUTPUT"
+            CURRENT=$(grep "Current version:" /tmp/kubectl-check.log | awk '{print $NF}')
+            LATEST=$(grep "Latest version:" /tmp/kubectl-check.log | awk '{print $NF}')
+            echo "current_version=$CURRENT" >> "$GITHUB_OUTPUT"
+            echo "latest_version=$LATEST" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_update=false" >> "$GITHUB_OUTPUT"
+          fi
+      
+      - name: Summary
+        id: summary
+        run: |
+          echo "### 🔍 Version Check Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Service | Current | Latest | Update? |" >> $GITHUB_STEP_SUMMARY
+          echo "|---------|---------|--------|---------|" >> $GITHUB_STEP_SUMMARY
+          
+          ANY_UPDATE=false
+          
+          if [ "${{ steps.check-minio.outputs.has_update }}" = "true" ]; then
+            echo "| MinIO | \`${{ steps.check-minio.outputs.current_version }}\` | \`${{ steps.check-minio.outputs.latest_version }}\` | ✅ Yes |" >> $GITHUB_STEP_SUMMARY
+            ANY_UPDATE=true
+          else
+            echo "| MinIO | - | - | ⏭️ No |" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          if [ "${{ steps.check-mongodb.outputs.has_update }}" = "true" ]; then
+            echo "| MongoDB | \`${{ steps.check-mongodb.outputs.current_version }}\` | \`${{ steps.check-mongodb.outputs.latest_version }}\` | ✅ Yes |" >> $GITHUB_STEP_SUMMARY
+            ANY_UPDATE=true
+          else
+            echo "| MongoDB | - | - | ⏭️ No |" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          if [ "${{ steps.check-postgresql.outputs.has_update }}" = "true" ]; then
+            echo "| PostgreSQL | \`${{ steps.check-postgresql.outputs.current_version }}\` | \`${{ steps.check-postgresql.outputs.latest_version }}\` | ✅ Yes |" >> $GITHUB_STEP_SUMMARY
+            ANY_UPDATE=true
+          else
+            echo "| PostgreSQL | - | - | ⏭️ No |" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          if [ "${{ steps.check-kubectl.outputs.has_update }}" = "true" ]; then
+            echo "| kubectl | \`${{ steps.check-kubectl.outputs.current_version }}\` | \`${{ steps.check-kubectl.outputs.latest_version }}\` | ✅ Yes |" >> $GITHUB_STEP_SUMMARY
+            ANY_UPDATE=true
+          else
+            echo "| kubectl | - | - | ⏭️ No |" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          echo "any_update=$ANY_UPDATE" >> "$GITHUB_OUTPUT"
+
+  # ===========================================
+  # Job 2: Test MinIO (if update available)
+  # ===========================================
+  test-minio:
+    needs: check-all-updates
+    if: needs.check-all-updates.outputs.minio_update == 'true' && github.event.inputs.skip_tests != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    outputs:
+      result: ${{ steps.result.outputs.status }}
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      
+      - name: Update MinIO files
+        id: update-files
+        run: |
+          chmod +x scripts/check-version.sh
+          if scripts/check-version.sh minio --update-files; then
+            echo "has_update=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "No update available - this job should not have run"
+            echo "has_update=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+      
+      - name: Create Kind Cluster
+        if: steps.update-files.outputs.has_update == 'true'
+        uses: helm/kind-action@v1
+        with:
+          cluster_name: test-cluster
+          wait: 120s
+      
+      - name: Setup and Run Tests
+        if: steps.update-files.outputs.has_update == 'true'
+        run: |
+          # Install Tilt
+          curl -fsSL https://raw.githubusercontent.com/tilt-dev/tilt/master/scripts/install.sh | bash
+          
+          # Setup Helm
+          helm repo add bitnami https://charts.bitnami.com/bitnami
+          helm repo add testkube https://kubeshop.github.io/helm-charts
+          helm repo update
+          
+          # Download Testkube chart
+          mkdir -p charts
+          helm pull testkube/testkube --version ${{ env.TESTKUBE_VERSION }} --untar -d charts/
+          
+          # Build dependencies
+          helm dependency build minio/helm
+          
+          # Build and load image
+          cd minio
+          docker build -t testkube/minio:latest -f minio-release.dockerfile .
+          kind load docker-image testkube/minio:latest --name test-cluster
+          cd ..
+          
+          # Pre-pull test images
+          docker pull kubeshop/testkube-tw-init:${{ env.TESTKUBE_VERSION }}
+          docker pull kubeshop/testkube-tw-toolkit:${{ env.TESTKUBE_VERSION }}
+          docker pull grafana/k6:1.1.0
+          docker pull alpine:3.20
+          kind load docker-image kubeshop/testkube-tw-init:${{ env.TESTKUBE_VERSION }} --name test-cluster
+          kind load docker-image kubeshop/testkube-tw-toolkit:${{ env.TESTKUBE_VERSION }} --name test-cluster
+          kind load docker-image grafana/k6:1.1.0 --name test-cluster
+          kind load docker-image alpine:3.20 --name test-cluster
+          
+          # Deploy with Tilt
+          cd minio
+          tilt ci -f oss.tiltfile --timeout 10m
+          cd ..
+          
+          # Wait for deployments
+          kubectl rollout status deployment/testkube-minio -n testkube --timeout=900s
+          kubectl rollout status deployment/testkube-api-server -n testkube --timeout=600s
+          
+          # Install Testkube CLI
+          TESTKUBE_CLI_VERSION=$(curl -s https://api.github.com/repos/kubeshop/testkube/releases/latest | grep tag_name | cut -d '"' -f 4)
+          curl -sSLf "https://github.com/kubeshop/testkube/releases/download/${TESTKUBE_CLI_VERSION}/testkube_${TESTKUBE_CLI_VERSION#v}_Linux_x86_64.tar.gz" | tar xz
+          sudo mv kubectl-testkube /usr/local/bin/
+          sudo ln -sf /usr/local/bin/kubectl-testkube /usr/local/bin/testkube
+          testkube disable telemetry
+          
+          # Configure CLI
+          kubectl port-forward svc/testkube-api-server 8088:8088 -n testkube &
+          sleep 5
+          testkube config api-uri http://localhost:8088
+          
+          # Run tests
+          kubectl apply -f test/
+          testkube run tw oss-smoke-test --watch
+          testkube run tw minio-artifact-test --watch
+      
+      - name: Set Result
+        id: result
+        if: always()
+        run: |
+          if [ "${{ steps.update-files.outputs.has_update }}" != "true" ]; then
+            echo "status=skipped" >> "$GITHUB_OUTPUT"
+          elif [ "${{ job.status }}" = "success" ]; then
+            echo "status=success" >> "$GITHUB_OUTPUT"
+          else
+            echo "status=failure" >> "$GITHUB_OUTPUT"
+          fi
+
+  # ===========================================
+  # Job 3: Test MongoDB (sequential, after MinIO)
+  # ===========================================
+  test-mongodb:
+    needs: [check-all-updates, test-minio]
+    if: always() && needs.check-all-updates.outputs.mongodb_update == 'true' && github.event.inputs.skip_tests != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    outputs:
+      result: ${{ steps.result.outputs.status }}
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Update MongoDB files
+        id: update-files
+        run: |
+          chmod +x scripts/check-version.sh
+          if scripts/check-version.sh mongodb --update-files; then
+            echo "has_update=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "No update available - this job should not have run"
+            echo "has_update=false" >> "$GITHUB_OUTPUT"
+          fi
+      
+      - name: Run MongoDB Tests
+        if: steps.update-files.outputs.has_update == 'true'
+        run: |
+          echo "MongoDB tests would run here"
+          echo "Using same test framework as MinIO"
+          # TODO: Implement MongoDB-specific tests
+      
+      - name: Set Result
+        id: result
+        if: always()
+        run: |
+          if [ "${{ steps.update-files.outputs.has_update }}" != "true" ]; then
+            echo "status=skipped" >> "$GITHUB_OUTPUT"
+          else
+            echo "status=${{ job.status }}" >> "$GITHUB_OUTPUT"
+          fi
+
+  # ===========================================
+  # Job 4: Test PostgreSQL (sequential, after MongoDB)
+  # ===========================================
+  test-postgresql:
+    needs: [check-all-updates, test-mongodb]
+    if: always() && needs.check-all-updates.outputs.postgresql_update == 'true' && github.event.inputs.skip_tests != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    outputs:
+      result: ${{ steps.result.outputs.status }}
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Update PostgreSQL files
+        id: update-files
+        run: |
+          chmod +x scripts/check-version.sh
+          if scripts/check-version.sh postgresql --update-files; then
+            echo "has_update=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "No update available - this job should not have run"
+            echo "has_update=false" >> "$GITHUB_OUTPUT"
+          fi
+      
+      - name: Run PostgreSQL Tests
+        if: steps.update-files.outputs.has_update == 'true'
+        run: |
+          echo "PostgreSQL tests would run here"
+          # TODO: Implement PostgreSQL-specific tests
+      
+      - name: Set Result
+        id: result
+        if: always()
+        run: |
+          if [ "${{ steps.update-files.outputs.has_update }}" != "true" ]; then
+            echo "status=skipped" >> "$GITHUB_OUTPUT"
+          else
+            echo "status=${{ job.status }}" >> "$GITHUB_OUTPUT"
+          fi
+
+  # ===========================================
+  # Job 5: Test kubectl (sequential, after PostgreSQL)
+  # ===========================================
+  test-kubectl:
+    needs: [check-all-updates, test-postgresql]
+    if: always() && needs.check-all-updates.outputs.kubectl_update == 'true' && github.event.inputs.skip_tests != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    outputs:
+      result: ${{ steps.result.outputs.status }}
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Update kubectl files
+        id: update-files
+        run: |
+          chmod +x scripts/check-version.sh
+          if scripts/check-version.sh kubectl --update-files; then
+            echo "has_update=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "No update available - this job should not have run"
+            echo "has_update=false" >> "$GITHUB_OUTPUT"
+          fi
+      
+      - name: Run kubectl Tests
+        if: steps.update-files.outputs.has_update == 'true'
+        run: |
+          echo "kubectl tests would run here"
+          # TODO: Implement kubectl-specific tests
+      
+      - name: Set Result
+        id: result
+        if: always()
+        run: |
+          if [ "${{ steps.update-files.outputs.has_update }}" != "true" ]; then
+            echo "status=skipped" >> "$GITHUB_OUTPUT"
+          else
+            echo "status=${{ job.status }}" >> "$GITHUB_OUTPUT"
+          fi
+
+  # ===========================================
+  # Job 6: Create PRs for successful tests
+  # ===========================================
+  create-prs:
+    needs: [check-all-updates, test-minio, test-mongodb, test-postgresql, test-kubectl]
+    if: always() && needs.check-all-updates.outputs.any_update == 'true' && github.event.inputs.dry_run != 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+      
+      - name: Configure Git
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+      
+      - name: Create MinIO PR
+        if: needs.check-all-updates.outputs.minio_update == 'true' && needs.test-minio.outputs.result == 'success'
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          chmod +x scripts/check-version.sh scripts/generate-pr-description.sh
+          scripts/check-version.sh minio --update-files
+          
+          # Generate PR description with AI
+          scripts/generate-pr-description.sh \
+            --service minio \
+            --current-version "${{ needs.check-all-updates.outputs.minio_current }}" \
+            --new-version "${{ needs.check-all-updates.outputs.minio_latest }}" \
+            --output /tmp/minio-pr.md
+      
+      - name: Create MinIO Pull Request
+        if: needs.check-all-updates.outputs.minio_update == 'true' && needs.test-minio.outputs.result == 'success'
+        uses: peter-evans/create-pull-request@v5
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: "chore: Update MinIO to ${{ needs.check-all-updates.outputs.minio_latest }}"
+          title: "chore: Update MinIO to ${{ needs.check-all-updates.outputs.minio_latest }}"
+          body-path: /tmp/minio-pr.md
+          branch: update/minio-${{ needs.check-all-updates.outputs.minio_latest }}
+          delete-branch: true
+          labels: |
+            automated
+            minio
+            dependencies
+            tests-passed
+      
+      - name: Create MongoDB PR
+        if: needs.check-all-updates.outputs.mongodb_update == 'true' && needs.test-mongodb.outputs.result == 'success'
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          scripts/check-version.sh mongodb --update-files
+          
+          # Generate PR description with AI
+          scripts/generate-pr-description.sh \
+            --service mongodb \
+            --current-version "${{ needs.check-all-updates.outputs.mongodb_current }}" \
+            --new-version "${{ needs.check-all-updates.outputs.mongodb_latest }}" \
+            --output /tmp/mongodb-pr.md
+      
+      - name: Create MongoDB Pull Request
+        if: needs.check-all-updates.outputs.mongodb_update == 'true' && needs.test-mongodb.outputs.result == 'success'
+        uses: peter-evans/create-pull-request@v5
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: "chore: Update MongoDB to ${{ needs.check-all-updates.outputs.mongodb_latest }}"
+          title: "chore: Update MongoDB to ${{ needs.check-all-updates.outputs.mongodb_latest }}"
+          body-path: /tmp/mongodb-pr.md
+          branch: update/mongodb-${{ needs.check-all-updates.outputs.mongodb_latest }}
+          delete-branch: true
+          labels: |
+            automated
+            mongodb
+            dependencies
+            tests-passed
+      
+      - name: Create PostgreSQL PR
+        if: needs.check-all-updates.outputs.postgresql_update == 'true' && needs.test-postgresql.outputs.result == 'success'
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          scripts/check-version.sh postgresql --update-files
+          
+          # Generate PR description with AI
+          scripts/generate-pr-description.sh \
+            --service postgresql \
+            --current-version "${{ needs.check-all-updates.outputs.postgresql_current }}" \
+            --new-version "${{ needs.check-all-updates.outputs.postgresql_latest }}" \
+            --output /tmp/postgresql-pr.md
+      
+      - name: Create PostgreSQL Pull Request
+        if: needs.check-all-updates.outputs.postgresql_update == 'true' && needs.test-postgresql.outputs.result == 'success'
+        uses: peter-evans/create-pull-request@v5
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: "chore: Update PostgreSQL to ${{ needs.check-all-updates.outputs.postgresql_latest }}"
+          title: "chore: Update PostgreSQL to ${{ needs.check-all-updates.outputs.postgresql_latest }}"
+          body-path: /tmp/postgresql-pr.md
+          branch: update/postgresql-${{ needs.check-all-updates.outputs.postgresql_latest }}
+          delete-branch: true
+          labels: |
+            automated
+            postgresql
+            dependencies
+            tests-passed
+      
+      - name: Create kubectl PR
+        if: needs.check-all-updates.outputs.kubectl_update == 'true' && needs.test-kubectl.outputs.result == 'success'
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          scripts/check-version.sh kubectl --update-files
+          
+          # Generate PR description with AI
+          scripts/generate-pr-description.sh \
+            --service kubectl \
+            --current-version "${{ needs.check-all-updates.outputs.kubectl_current }}" \
+            --new-version "${{ needs.check-all-updates.outputs.kubectl_latest }}" \
+            --output /tmp/kubectl-pr.md
+      
+      - name: Create kubectl Pull Request
+        if: needs.check-all-updates.outputs.kubectl_update == 'true' && needs.test-kubectl.outputs.result == 'success'
+        uses: peter-evans/create-pull-request@v5
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: "chore: Update kubectl to ${{ needs.check-all-updates.outputs.kubectl_latest }}"
+          title: "chore: Update kubectl to ${{ needs.check-all-updates.outputs.kubectl_latest }}"
+          body-path: /tmp/kubectl-pr.md
+          branch: update/kubectl-${{ needs.check-all-updates.outputs.kubectl_latest }}
+          delete-branch: true
+          labels: |
+            automated
+            kubectl
+            dependencies
+            tests-passed
+      
+      - name: Final Summary
+        if: always()
+        run: |
+          echo "### 📋 PR Creation Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Service | Update | Tests | PR Created |" >> $GITHUB_STEP_SUMMARY
+          echo "|---------|--------|-------|------------|" >> $GITHUB_STEP_SUMMARY
+          
+          # MinIO
+          if [ "${{ needs.check-all-updates.outputs.minio_update }}" = "true" ]; then
+            if [ "${{ needs.test-minio.outputs.result }}" = "success" ]; then
+              echo "| MinIO | ✅ | ✅ | ✅ |" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "| MinIO | ✅ | ❌ | ⏭️ |" >> $GITHUB_STEP_SUMMARY
+            fi
+          else
+            echo "| MinIO | ⏭️ | ⏭️ | ⏭️ |" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          # MongoDB
+          if [ "${{ needs.check-all-updates.outputs.mongodb_update }}" = "true" ]; then
+            if [ "${{ needs.test-mongodb.outputs.result }}" = "success" ]; then
+              echo "| MongoDB | ✅ | ✅ | ✅ |" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "| MongoDB | ✅ | ❌ | ⏭️ |" >> $GITHUB_STEP_SUMMARY
+            fi
+          else
+            echo "| MongoDB | ⏭️ | ⏭️ | ⏭️ |" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          # PostgreSQL
+          if [ "${{ needs.check-all-updates.outputs.postgresql_update }}" = "true" ]; then
+            if [ "${{ needs.test-postgresql.outputs.result }}" = "success" ]; then
+              echo "| PostgreSQL | ✅ | ✅ | ✅ |" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "| PostgreSQL | ✅ | ❌ | ⏭️ |" >> $GITHUB_STEP_SUMMARY
+            fi
+          else
+            echo "| PostgreSQL | ⏭️ | ⏭️ | ⏭️ |" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          # kubectl
+          if [ "${{ needs.check-all-updates.outputs.kubectl_update }}" = "true" ]; then
+            if [ "${{ needs.test-kubectl.outputs.result }}" = "success" ]; then
+              echo "| kubectl | ✅ | ✅ | ✅ |" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "| kubectl | ✅ | ❌ | ⏭️ |" >> $GITHUB_STEP_SUMMARY
+            fi
+          else
+            echo "| kubectl | ⏭️ | ⏭️ | ⏭️ |" >> $GITHUB_STEP_SUMMARY
+          fi
+

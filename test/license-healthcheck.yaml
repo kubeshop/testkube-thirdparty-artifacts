@@ -1,0 +1,52 @@
+kind: TestWorkflow
+apiVersion: testworkflows.testkube.io/v1
+metadata:
+  name: license-healthcheck
+  namespace: testkube-agent
+  labels:
+    argocd.argoproj.io/instance: testkube-dev-agent
+    core-tests: healthcheck
+    environment: prod
+spec:
+  events:
+  - cronjob:
+      cron: '*/15 * * * *'
+  system:
+    pureByDefault: true
+  container:
+    image: alpine:3.22.2
+    env:
+    - name: VAR_NAMEE
+      value: value
+    - name: VAR2_NAME
+      value: vall
+  job:
+    activeDeadlineSeconds: 180
+  steps:
+  - name: Install dependencies
+    shell: |
+      apk add --no-cache curl jq
+  - name: License endpoint healthcheck
+    run:
+      env:
+      - name: LICENSE_KEY
+        valueFrom:
+          secretKeyRef:
+            name: testkube-agent-secrets
+            key: ENTERPRISE_INSTALLATION_TEST_LICENSE_KEY
+      shell: |
+        RESPONSE=$(curl -s -X POST -H "Content-Type: application/json" \
+        -d "{\"license\":\"$LICENSE_KEY\"}" \
+        https://license.testkube.io/validate)
+
+        echo "$RESPONSE" | jq
+
+        [ "$(echo "$RESPONSE" | jq -r '.code')" = "VALID" ] || exit 1
+        [ "$(echo "$RESPONSE" | jq -r '.valid')" = "true" ] || exit 1
+
+        echo "License healthcheck OK"
+status:
+  health:
+    passRate: 1
+    flipRate: 0
+    overallHealth: 1

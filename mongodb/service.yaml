@@ -1,0 +1,9 @@
+# MongoDB Service Configuration
+name: mongodb
+display_name: MongoDB
+source: dockerhub
+source_image: mongo
+version_pattern: "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+dockerfile: mongo-8.dockerfile
+gar_image: us-east1-docker.pkg.dev/testkube-cloud-372110/testkube/mongodb
+

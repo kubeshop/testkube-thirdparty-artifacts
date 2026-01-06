@@ -1,0 +1,92 @@
+kind: TestWorkflow
+apiVersion: testworkflows.testkube.io/v1
+metadata:
+  name: oss-smoke-test
+  namespace: testkube
+  labels:
+    core-tests: installation
+    tool: testkube-oss
+description: OSS installation test - runs k6-workflow-smoke
+spec:
+  system:
+    pureByDefault: true
+  content:
+    git:
+      uri: https://github.com/kubeshop/testkube
+      revision: main
+      paths:
+      - test/k6/crd-workflow/smoke.yaml
+  container:
+    image: alpine:3.20
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+  pod:
+    serviceAccountName: testkube-api-server
+  steps:
+  - name: Install dependencies
+    shell: |
+      apk add --no-cache curl jq
+      
+      # Install kubectl
+      curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+      chmod +x kubectl
+      mv kubectl /usr/local/bin/
+      kubectl version --client
+
+  - name: Apply k6-workflow-smoke
+    workingDir: /data/repo/test/k6/crd-workflow
+    shell: |
+      echo "=== Applying k6-workflow-smoke TestWorkflow ==="
+      cat smoke.yaml
+      
+      kubectl apply -f smoke.yaml -n testkube
+      
+      echo ""
+      echo "=== Verifying TestWorkflow was created ==="
+      kubectl get testworkflow k6-workflow-smoke -n testkube
+      echo "✅ TestWorkflow applied successfully!"
+
+  - name: Run k6-workflow-smoke via API
+    shell: |
+      echo "=== Running k6-workflow-smoke via Testkube API ==="
+      
+      # Trigger the workflow execution
+      RESPONSE=$(curl -s -X POST "http://testkube-api-server:8088/v1/test-workflows/k6-workflow-smoke/executions" \
+        -H "Content-Type: application/json" \
+        -d '{}')
+      
+      echo "Response: $RESPONSE"
+      
+      EXECUTION_ID=$(echo $RESPONSE | jq -r '.id')
+      echo "Execution ID: $EXECUTION_ID"
+      
+      if [ "$EXECUTION_ID" = "null" ] || [ -z "$EXECUTION_ID" ]; then
+        echo "❌ Failed to start execution"
+        exit 1
+      fi
+      
+      echo ""
+      echo "=== Waiting for execution to complete ==="
+      
+      # Poll for completion (max 10 minutes)
+      for i in $(seq 1 120); do
+        STATUS=$(curl -s "http://testkube-api-server:8088/v1/test-workflow-executions/$EXECUTION_ID" | jq -r '.result.status // .status')
+        echo "[$i/120] Status: $STATUS"
+        
+        if [ "$STATUS" = "passed" ]; then
+          echo "✅ Execution passed!"
+          exit 0
+        elif [ "$STATUS" = "failed" ] || [ "$STATUS" = "aborted" ]; then
+          echo "❌ Execution $STATUS"
+          curl -s "http://testkube-api-server:8088/v1/test-workflow-executions/$EXECUTION_ID" | jq '.result'
+          exit 1
+        fi
+        
+        sleep 5
+      done
+      
+      echo "❌ Timeout waiting for execution"
+      exit 1
+

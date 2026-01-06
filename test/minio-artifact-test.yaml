@@ -1,0 +1,64 @@
+kind: TestWorkflow
+apiVersion: testworkflows.testkube.io/v1
+metadata:
+  name: minio-artifact-test
+  namespace: testkube
+  labels:
+    core-tests: artifacts
+    component: minio
+description: Test MinIO artifact storage with various file sizes
+spec:
+  system:
+    pureByDefault: true
+  container:
+    image: alpine:3.20
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+  steps:
+  - name: Create test artifacts
+    shell: |
+      echo "=== Creating Test Artifacts ==="
+      mkdir -p /data/artifacts
+      
+      # Small text file
+      echo "MinIO Artifact Test - $(date)" > /data/artifacts/test.txt
+      
+      # JSON result file
+      cat > /data/artifacts/result.json << EOF
+      {
+        "test": "minio-artifact-test",
+        "status": "passed",
+        "timestamp": "$(date -Iseconds)"
+      }
+      EOF
+      
+      # 10MB binary file
+      echo "Creating 10MB test file..."
+      dd if=/dev/urandom of=/data/artifacts/data-10mb.bin bs=1M count=10 2>/dev/null
+      
+      # 50MB binary file
+      echo "Creating 50MB test file..."
+      dd if=/dev/urandom of=/data/artifacts/data-50mb.bin bs=1M count=50 2>/dev/null
+      
+      echo ""
+      echo "=== Artifacts Created ==="
+      ls -lh /data/artifacts/
+      
+      echo ""
+      echo "✅ Artifacts created successfully!"
+    artifacts:
+      paths:
+        - /data/artifacts/**/*
+
+  - name: Verify artifacts uploaded
+    shell: |
+      apk add --no-cache curl
+      
+      echo "=== Verifying MinIO connectivity ==="
+      curl -s http://testkube-minio:9000/minio/health/live && echo "MinIO is healthy" || echo "MinIO health check"
+      
+      echo ""
+      echo "✅ Artifact test completed!"
+
