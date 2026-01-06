@@ -1,0 +1,84 @@
+name: Create Version Tag
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [main]
+
+jobs:
+  create-tag:
+    # Solo PRs automatizados mergeados
+    if: >
+      github.event.pull_request.merged == true && 
+      contains(github.event.pull_request.labels.*.name, 'automated')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
+      - name: Extract service and version from PR
+        id: extract
+        run: |
+          TITLE="${{ github.event.pull_request.title }}"
+          LABELS='${{ toJSON(github.event.pull_request.labels.*.name) }}'
+          
+          # Detect service from labels
+          if echo "$LABELS" | grep -q '"minio"'; then
+            SERVICE="minio"
+          elif echo "$LABELS" | grep -q '"mongodb"'; then
+            SERVICE="mongodb"
+          elif echo "$LABELS" | grep -q '"postgresql"'; then
+            SERVICE="postgresql"
+          elif echo "$LABELS" | grep -q '"kubectl"'; then
+            SERVICE="kubectl"
+          else
+            echo "No service label found"
+            exit 0
+          fi
+          
+          # Get version from Chart.yaml
+          VERSION=$(grep "^appVersion:" ${SERVICE}/helm/Chart.yaml | sed 's/appVersion: "//' | sed 's/"//g' | tr -d '[:space:]')
+          
+          echo "service=$SERVICE" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=${SERVICE}-${VERSION}" >> "$GITHUB_OUTPUT"
+          
+          echo "📦 Service: $SERVICE"
+          echo "📌 Version: $VERSION"
+          echo "🏷️ Tag: ${SERVICE}-${VERSION}"
+      
+      - name: Create and push tag
+        if: steps.extract.outputs.tag
+        run: |
+          TAG="${{ steps.extract.outputs.tag }}"
+          
+          # Check if tag already exists
+          if git rev-parse "$TAG" >/dev/null 2>&1; then
+            echo "⚠️ Tag $TAG already exists, skipping"
+            exit 0
+          fi
+          
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag "$TAG"
+          git push origin "$TAG"
+          
+          echo "✅ Created and pushed tag: $TAG"
+      
+      - name: Summary
+        if: steps.extract.outputs.tag
+        run: |
+          echo "### 🏷️ Version Tag Created" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Property | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Service | **${{ steps.extract.outputs.service }}** |" >> $GITHUB_STEP_SUMMARY
+          echo "| Version | \`${{ steps.extract.outputs.version }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Tag | \`${{ steps.extract.outputs.tag }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| PR | #${{ github.event.pull_request.number }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "🚀 This will trigger \`build-images.yaml\` to build the production image." >> $GITHUB_STEP_SUMMARY
+

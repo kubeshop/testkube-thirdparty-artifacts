@@ -4,7 +4,10 @@ on:
   push:
     branches: [main]
     tags:
-      - '*'
+      - 'minio-*'
+      - 'mongodb-*'
+      - 'postgresql-*'
+      - 'kubectl-*'
 
 concurrency: ${{ github.workflow }}-${{ github.ref }}
 
@@ -19,34 +22,47 @@ jobs:
       GAR_LOCATION:   ${{ secrets.GAR_LOCATION }}
       GAR_REPOSITORY: testkube
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - uses: depot/setup-action@v1
+      
       - name: Auth to Google Cloud
         uses: google-github-actions/auth@v2
         with:
           project_id: ${{ env.GAR_PROJECT_ID }}
-          credentials_json: ${{ secrets.GKE_SA_KEY_PROD }} #Key to SA in Testkube Prod project
+          credentials_json: ${{ secrets.GKE_SA_KEY_PROD }}
+      
       - name: Configure Docker for GAR
         run: gcloud auth configure-docker ${{ env.GAR_LOCATION }}-docker.pkg.dev -q
-      - id: target
+      
+      - name: Determine target service
+        id: target
         run: |
-          if [[ "${{ github.ref_type }}" == "tag" && "${{ github.ref_name }}" == minio* ]]; then
-            echo "target=minio" >> "$GITHUB_OUTPUT"
-          elif [[ "${{ github.ref_type }}" == "tag" && "${{ github.ref_name }}" == mongodb* ]]; then
-            echo "target=mongodb" >> "$GITHUB_OUTPUT"
+          if [[ "${{ github.ref_type }}" == "tag" ]]; then
+            case "${{ github.ref_name }}" in
+              minio-*)      echo "target=minio" >> "$GITHUB_OUTPUT" ;;
+              mongodb-*)    echo "target=mongodb" >> "$GITHUB_OUTPUT" ;;
+              postgresql-*) echo "target=postgresql" >> "$GITHUB_OUTPUT" ;;
+              kubectl-*)    echo "target=kubectl" >> "$GITHUB_OUTPUT" ;;
+              *)            echo "target=default" >> "$GITHUB_OUTPUT" ;;
+            esac
           else
             echo "target=default" >> "$GITHUB_OUTPUT"
           fi
+      
       - name: Remove prefix from tag
         id: prefix
         run: |
           ref='${{ github.ref_name }}'
           case "$ref" in
-            minio-*)   echo "tag=${ref#minio-}"   >>"$GITHUB_OUTPUT" ;;
-            mongodb-*) echo "tag=${ref#mongodb-}" >>"$GITHUB_OUTPUT" ;;
-            *)         echo "tag=temp-$ref" >>"$GITHUB_OUTPUT" ;;
+            minio-*)      echo "tag=${ref#minio-}" >> "$GITHUB_OUTPUT" ;;
+            mongodb-*)    echo "tag=${ref#mongodb-}" >> "$GITHUB_OUTPUT" ;;
+            postgresql-*) echo "tag=${ref#postgresql-}" >> "$GITHUB_OUTPUT" ;;
+            kubectl-*)    echo "tag=${ref#kubectl-}" >> "$GITHUB_OUTPUT" ;;
+            *)            echo "tag=temp-$ref" >> "$GITHUB_OUTPUT" ;;
           esac
-      - name: Create Docker tags and metadata for Minio
+      
+      # MinIO metadata
+      - name: Create Docker tags and metadata for MinIO
         if: github.ref_type == 'branch' || (github.ref_type == 'tag' && startsWith(github.ref_name, 'minio'))
         id: minio
         uses: docker/metadata-action@v5
@@ -56,7 +72,8 @@ jobs:
             ${{ env.GAR_LOCATION }}-docker.pkg.dev/${{ env.GAR_PROJECT_ID }}/${{ env.GAR_REPOSITORY }}/minio
           tags: |
             type=raw,value=${{ steps.prefix.outputs.tag }}
-            type=semver,pattern={{version}}
+      
+      # MongoDB metadata
       - name: Create Docker tags and metadata for MongoDB
         if: github.ref_type == 'branch' || (github.ref_type == 'tag' && startsWith(github.ref_name, 'mongodb'))
         id: mongodb
@@ -67,7 +84,31 @@ jobs:
             ${{ env.GAR_LOCATION }}-docker.pkg.dev/${{ env.GAR_PROJECT_ID }}/${{ env.GAR_REPOSITORY }}/mongodb
           tags: |
             type=raw,value=${{ steps.prefix.outputs.tag }}
-            type=semver,pattern={{version}}
+      
+      # PostgreSQL metadata
+      - name: Create Docker tags and metadata for PostgreSQL
+        if: github.ref_type == 'branch' || (github.ref_type == 'tag' && startsWith(github.ref_name, 'postgresql'))
+        id: postgresql
+        uses: docker/metadata-action@v5
+        with:
+          bake-target: 'postgresql'
+          images: |
+            ${{ env.GAR_LOCATION }}-docker.pkg.dev/${{ env.GAR_PROJECT_ID }}/${{ env.GAR_REPOSITORY }}/postgresql
+          tags: |
+            type=raw,value=${{ steps.prefix.outputs.tag }}
+      
+      # kubectl metadata
+      - name: Create Docker tags and metadata for kubectl
+        if: github.ref_type == 'branch' || (github.ref_type == 'tag' && startsWith(github.ref_name, 'kubectl'))
+        id: kubectl
+        uses: docker/metadata-action@v5
+        with:
+          bake-target: 'kubectl'
+          images: |
+            ${{ env.GAR_LOCATION }}-docker.pkg.dev/${{ env.GAR_PROJECT_ID }}/${{ env.GAR_REPOSITORY }}/kubectl
+          tags: |
+            type=raw,value=${{ steps.prefix.outputs.tag }}
+      
       - name: Build image
         uses: depot/bake-action@v1.12.1
         with:
@@ -77,4 +118,16 @@ jobs:
             ./docker-bake.hcl
             ${{ steps.minio.outputs.bake-file }}
             ${{ steps.mongodb.outputs.bake-file }}
+            ${{ steps.postgresql.outputs.bake-file }}
+            ${{ steps.kubectl.outputs.bake-file }}
           push: true
+      
+      - name: Summary
+        run: |
+          echo "### 🐳 Image Built and Pushed" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Property | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Target | \`${{ steps.target.outputs.target }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Tag | \`${{ steps.prefix.outputs.tag }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Ref | \`${{ github.ref_name }}\` |" >> $GITHUB_STEP_SUMMARY
