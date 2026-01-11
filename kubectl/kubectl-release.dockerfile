@@ -1,7 +1,7 @@
 # kubectl Dockerfile - Testkube Edition
 # Based on official alpine/kubectl image
 
-ARG KUBECTL_VERSION=1.34.1
+ARG KUBECTL_VERSION=1.35.0
 
 FROM alpine/kubectl:${KUBECTL_VERSION}
 
