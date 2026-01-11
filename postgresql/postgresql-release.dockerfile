@@ -1,7 +1,7 @@
 # PostgreSQL Dockerfile - Testkube Edition
 # Based on official postgres image
 
-ARG POSTGRESQL_VERSION=18.0
+ARG POSTGRESQL_VERSION=18.1
 
 FROM postgres:${POSTGRESQL_VERSION}
 
