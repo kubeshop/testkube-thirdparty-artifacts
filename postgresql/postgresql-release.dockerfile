@@ -1,12 +1,10 @@
 # PostgreSQL Dockerfile - Testkube Edition
 # Based on official postgres image
+# POSTGRESQL_VERSION is updated by scripts/check-version.sh
 
-ARG POSTGRESQL_VERSION=18.0
-
-FROM postgres:${POSTGRESQL_VERSION}
+FROM postgres:18.1
 
 LABEL maintainer="Testkube Team" \
-      version="${POSTGRESQL_VERSION}" \
       description="PostgreSQL - Testkube Edition"
 
 # Add any custom configurations here if needed

@@ -1,13 +1,10 @@
 # kubectl Dockerfile - Testkube Edition
 # Based on official alpine/kubectl image
+# KUBECTL_VERSION is updated by scripts/check-version.sh
 
-ARG KUBECTL_VERSION=1.35.0
-
-FROM alpine/kubectl:${KUBECTL_VERSION}
+FROM alpine/kubectl:1.35.0
 
 LABEL maintainer="Testkube Team" \
-      version="${KUBECTL_VERSION}" \
       description="kubectl - Testkube Edition"
 
 # Add any custom configurations here if needed
-

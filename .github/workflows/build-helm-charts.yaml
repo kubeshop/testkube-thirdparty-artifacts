@@ -81,3 +81,4 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Registry:** \`oci://${{ env.GAR_LOCATION }}-docker.pkg.dev/${{ env.GAR_PROJECT_ID }}/${{ env.CHARTS_REPOSITORY }}\`" >> $GITHUB_STEP_SUMMARY
 
+
