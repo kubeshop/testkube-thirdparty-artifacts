@@ -545,6 +545,11 @@ jobs:
           KUBECTL_PR_URL: ${{ steps.kubectl-pr.outputs.pull-request-url }}
           KUBECTL_PR_NUMBER: ${{ steps.kubectl-pr.outputs.pull-request-number }}
         run: |
+          if [ -z "$SLACK_WEBHOOK_URL" ]; then
+            echo "SLACK_WEBHOOK_URL not set. Skipping Slack notification."
+            exit 0
+          fi
+
           # Build the services list
           SERVICES_TEXT=""
           PRS_CREATED=0
