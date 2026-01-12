@@ -420,6 +420,7 @@ jobs:
             --output /tmp/minio-pr.md
       
       - name: Create MinIO Pull Request
+        id: minio-pr
         if: needs.check-all-updates.outputs.minio_update == 'true' && needs.test-minio.outputs.result == 'success'
         uses: peter-evans/create-pull-request@v5
         with:
@@ -450,6 +451,7 @@ jobs:
             --output /tmp/mongodb-pr.md
       
       - name: Create MongoDB Pull Request
+        id: mongodb-pr
         if: needs.check-all-updates.outputs.mongodb_update == 'true' && needs.test-mongodb.outputs.result == 'success'
         uses: peter-evans/create-pull-request@v5
         with:
@@ -480,6 +482,7 @@ jobs:
             --output /tmp/postgresql-pr.md
       
       - name: Create PostgreSQL Pull Request
+        id: postgresql-pr
         if: needs.check-all-updates.outputs.postgresql_update == 'true' && needs.test-postgresql.outputs.result == 'success'
         uses: peter-evans/create-pull-request@v5
         with:
@@ -510,6 +513,7 @@ jobs:
             --output /tmp/kubectl-pr.md
       
       - name: Create kubectl Pull Request
+        id: kubectl-pr
         if: needs.check-all-updates.outputs.kubectl_update == 'true' && needs.test-kubectl.outputs.result == 'success'
         uses: peter-evans/create-pull-request@v5
         with:
@@ -524,6 +528,112 @@ jobs:
             kubectl
             dependencies
             tests-passed
+      
+      # ===========================================
+      # Slack Notification - Send summary of created PRs
+      # ===========================================
+      - name: Send Slack Notification
+        if: always()
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          MINIO_PR_URL: ${{ steps.minio-pr.outputs.pull-request-url }}
+          MINIO_PR_NUMBER: ${{ steps.minio-pr.outputs.pull-request-number }}
+          MONGODB_PR_URL: ${{ steps.mongodb-pr.outputs.pull-request-url }}
+          MONGODB_PR_NUMBER: ${{ steps.mongodb-pr.outputs.pull-request-number }}
+          POSTGRESQL_PR_URL: ${{ steps.postgresql-pr.outputs.pull-request-url }}
+          POSTGRESQL_PR_NUMBER: ${{ steps.postgresql-pr.outputs.pull-request-number }}
+          KUBECTL_PR_URL: ${{ steps.kubectl-pr.outputs.pull-request-url }}
+          KUBECTL_PR_NUMBER: ${{ steps.kubectl-pr.outputs.pull-request-number }}
+        run: |
+          # Build the services list
+          SERVICES_TEXT=""
+          PRS_CREATED=0
+          
+          if [ -n "$MINIO_PR_URL" ]; then
+            SERVICES_TEXT="${SERVICES_TEXT}• *MinIO*: \`${{ needs.check-all-updates.outputs.minio_current }}\` → \`${{ needs.check-all-updates.outputs.minio_latest }}\` (<${MINIO_PR_URL}|#${MINIO_PR_NUMBER}>)\n"
+            PRS_CREATED=$((PRS_CREATED + 1))
+          fi
+          
+          if [ -n "$MONGODB_PR_URL" ]; then
+            SERVICES_TEXT="${SERVICES_TEXT}• *MongoDB*: \`${{ needs.check-all-updates.outputs.mongodb_current }}\` → \`${{ needs.check-all-updates.outputs.mongodb_latest }}\` (<${MONGODB_PR_URL}|#${MONGODB_PR_NUMBER}>)\n"
+            PRS_CREATED=$((PRS_CREATED + 1))
+          fi
+          
+          if [ -n "$POSTGRESQL_PR_URL" ]; then
+            SERVICES_TEXT="${SERVICES_TEXT}• *PostgreSQL*: \`${{ needs.check-all-updates.outputs.postgresql_current }}\` → \`${{ needs.check-all-updates.outputs.postgresql_latest }}\` (<${POSTGRESQL_PR_URL}|#${POSTGRESQL_PR_NUMBER}>)\n"
+            PRS_CREATED=$((PRS_CREATED + 1))
+          fi
+          
+          if [ -n "$KUBECTL_PR_URL" ]; then
+            SERVICES_TEXT="${SERVICES_TEXT}• *kubectl*: \`${{ needs.check-all-updates.outputs.kubectl_current }}\` → \`${{ needs.check-all-updates.outputs.kubectl_latest }}\` (<${KUBECTL_PR_URL}|#${KUBECTL_PR_NUMBER}>)\n"
+            PRS_CREATED=$((PRS_CREATED + 1))
+          fi
+          
+          # Only send notification if PRs were created
+          if [ $PRS_CREATED -gt 0 ]; then
+            PAYLOAD=$(cat <<EOF
+          {
+            "blocks": [
+              {
+                "type": "header",
+                "text": {
+                  "type": "plain_text",
+                  "text": "🔄 Third-Party Updates - ${PRS_CREATED} PR(s) Created",
+                  "emoji": true
+                }
+              },
+              {
+                "type": "section",
+                "text": {
+                  "type": "mrkdwn",
+                  "text": "*📦 Services Updated:*\n${SERVICES_TEXT}"
+                }
+              },
+              {
+                "type": "context",
+                "elements": [
+                  {
+                    "type": "mrkdwn",
+                    "text": "✅ All regression tests passed before PR creation"
+                  }
+                ]
+              },
+              {
+                "type": "actions",
+                "elements": [
+                  {
+                    "type": "button",
+                    "text": {
+                      "type": "plain_text",
+                      "text": "📋 View All PRs",
+                      "emoji": true
+                    },
+                    "url": "${{ github.server_url }}/${{ github.repository }}/pulls?q=is%3Apr+is%3Aopen+label%3Aautomated"
+                  },
+                  {
+                    "type": "button",
+                    "text": {
+                      "type": "plain_text",
+                      "text": "🔍 View Workflow Run",
+                      "emoji": true
+                    },
+                    "url": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+                  }
+                ]
+              }
+            ]
+          }
+          EOF
+          )
+            
+            curl -X POST -H 'Content-type: application/json' \
+              --data "$PAYLOAD" \
+              "$SLACK_WEBHOOK_URL"
+            
+            echo "✅ Slack notification sent for $PRS_CREATED PR(s)"
+          else
+            echo "⏭️ No PRs created, skipping Slack notification"
+          fi
       
       - name: Final Summary
         if: always()
