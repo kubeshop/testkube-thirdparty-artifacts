@@ -857,9 +857,9 @@ externalAccess:
     ## @param externalAccess.autoDiscovery.image.pullSecrets Init container auto-discovery image pull secrets
     ##
     image:
-      registry: docker.io
-      repository: alpine/kubectl
-      tag: 1.34.1
+      registry: us-east1-docker.pkg.dev
+      repository: testkube-cloud-372110/testkube/kubectl
+      tag: 1.35.0
       digest: ""
       ## Specify a imagePullPolicy
       ## ref: https://kubernetes.io/docs/concepts/containers/images/#pre-pulled-images
