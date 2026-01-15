@@ -7,4 +7,5 @@ FROM alpine/kubectl:1.35.0
 LABEL maintainer="Testkube Team" \
       description="kubectl - Testkube Edition"
 
-# Add any custom configurations here if needed
+# Ensure /bin/bash exists (some jobs invoke bash explicitly)
+RUN apk add --no-cache bash
