@@ -2,7 +2,7 @@
 # Based on official postgres image
 # POSTGRESQL_VERSION is updated by scripts/check-version.sh
 
-FROM postgres:18.1
+FROM postgres:18.2
 
 LABEL maintainer="Testkube Team" \
       description="PostgreSQL - Testkube Edition"
