@@ -85,5 +85,5 @@ EOF
 #########################
 minio_client_configure_local() {
     info "Adding local Minio host to 'mc' configuration..."
-    minio_client_execute alias set local "${MINIO_SERVER_SCHEME}://localhost:${MINIO_SERVER_PORT_NUMBER}" "${MINIO_SERVER_ROOT_USER}" "${MINIO_SERVER_ROOT_PASSWORD}" # >/dev/null 2>&1
+    minio_client_execute alias set local "${MINIO_SERVER_SCHEME}://localhost:${MINIO_SERVER_PORT_NUMBER}" "${MINIO_SERVER_ROOT_USER}" "${MINIO_SERVER_ROOT_PASSWORD}" >/dev/null 2>&1
 }
