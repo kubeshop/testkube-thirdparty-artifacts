@@ -48,7 +48,7 @@ RUN --mount=type=cache,target="$GOMODCACHE" \
 
 # Stage 3: Final image based on official MongoDB
 # MONGODB_VERSION is updated by scripts/check-version.sh
-FROM mongo:8.2.3
+FROM mongo:8.2.5
 
 ARG TARGETARCH
 
