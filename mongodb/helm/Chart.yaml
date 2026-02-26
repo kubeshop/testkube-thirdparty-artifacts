@@ -2,9 +2,9 @@ annotations:
   category: Database
   images: |
     - name: kubectl
-      image: testkube-cloud-372110/testkube/kubectl:1.35.0
+      image: us-east1-docker.pkg.dev/testkube-cloud-372110/testkube/kubectl:1.35.1
     - name: mongodb
-      image: us-east1-docker.pkg.dev/testkube-cloud-372110/testkube/mongodb:8.0.15
+      image: us-east1-docker.pkg.dev/testkube-cloud-372110/testkube/mongodb:8.2.5
     - name: nginx
       image: docker.io/nginx:1.29.2-alpine
     - name: os-shell

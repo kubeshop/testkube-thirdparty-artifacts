@@ -2,7 +2,7 @@ annotations:
   category: Tools
   images: |
     - name: kubectl
-      image: us-east1-docker.pkg.dev/testkube-cloud-372110/testkube/kubectl:1.34.1
+      image: us-east1-docker.pkg.dev/testkube-cloud-372110/testkube/kubectl:1.35.1
   licenses: Apache-2.0
 apiVersion: v2
 appVersion: "1.35.1"
