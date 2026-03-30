@@ -29,22 +29,16 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    env:
-      GAR_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID_PROD }}
-      GAR_LOCATION:   ${{ secrets.GAR_LOCATION }}
-      GAR_REPOSITORY: testkube
     steps:
       - uses: actions/checkout@v4
       - uses: depot/setup-action@v1
-      
-      - name: Auth to Google Cloud
-        uses: google-github-actions/auth@v2
+
+      - name: DockerHub login (kubeshop)
+        if: ${{ inputs.dry_run == false }}
+        uses: docker/login-action@v3
         with:
-          project_id: ${{ env.GAR_PROJECT_ID }}
-          credentials_json: ${{ secrets.GKE_SA_KEY_PROD }}
-      
-      - name: Configure Docker for GAR
-        run: gcloud auth configure-docker ${{ env.GAR_LOCATION }}-docker.pkg.dev -q
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
       
       - name: Extract version from Chart.yaml
         id: version
@@ -64,13 +58,24 @@ jobs:
           echo "🏷️ Suffix: $SUFFIX"
           echo "🎯 Final Tag: $FINAL_VERSION"
       
+      - name: Determine DockerHub image name
+        id: dockerhub
+        run: |
+          case "${{ inputs.service }}" in
+            minio)      echo "image=kubeshop/testkube-minio" >> "$GITHUB_OUTPUT" ;;
+            mongodb)    echo "image=kubeshop/bitnami-mongodb" >> "$GITHUB_OUTPUT" ;;
+            postgresql) echo "image=kubeshop/testkube-postgres" >> "$GITHUB_OUTPUT" ;;
+            kubectl)    echo "image=kubeshop/testkube-kubectl" >> "$GITHUB_OUTPUT" ;;
+            *)          echo "Unknown service: ${{ inputs.service }}"; exit 1 ;;
+          esac
+      
       - name: Create Docker tags and metadata
         id: meta
         uses: docker/metadata-action@v5
         with:
           bake-target: ${{ inputs.service }}
           images: |
-            ${{ env.GAR_LOCATION }}-docker.pkg.dev/${{ env.GAR_PROJECT_ID }}/${{ env.GAR_REPOSITORY }}/${{ inputs.service }}
+            ${{ steps.dockerhub.outputs.image }}
           tags: |
             type=raw,value=${{ steps.version.outputs.tag }}
       
@@ -88,7 +93,7 @@ jobs:
         run: |
           SERVICE="${{ inputs.service }}"
           VERSION="${{ steps.version.outputs.tag }}"
-          GAR_IMAGE="${{ env.GAR_LOCATION }}-docker.pkg.dev/${{ env.GAR_PROJECT_ID }}/${{ env.GAR_REPOSITORY }}/${SERVICE}"
+          DOCKERHUB_IMAGE="${{ steps.dockerhub.outputs.image }}"
           DRY_RUN="${{ inputs.dry_run }}"
           
           echo "### 🐳 Manual Image Build" >> $GITHUB_STEP_SUMMARY
@@ -99,14 +104,14 @@ jobs:
           echo "| Base Version | \`${{ steps.version.outputs.base_version }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| Suffix | \`${{ steps.version.outputs.suffix }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| Final Tag | \`${VERSION}\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| Image | \`${GAR_IMAGE}:${VERSION}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Image | \`${DOCKERHUB_IMAGE}:${VERSION}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| Dry Run | ${DRY_RUN} |" >> $GITHUB_STEP_SUMMARY
           echo "| Triggered by | @${{ github.actor }} |" >> $GITHUB_STEP_SUMMARY
           
           if [ "$DRY_RUN" == "true" ]; then
             echo "" >> $GITHUB_STEP_SUMMARY
-            echo "⚠️ **Dry run mode** - Image was built but NOT pushed to GAR" >> $GITHUB_STEP_SUMMARY
+            echo "⚠️ **Dry run mode** - Image was built but NOT pushed to DockerHub" >> $GITHUB_STEP_SUMMARY
           else
             echo "" >> $GITHUB_STEP_SUMMARY
-            echo "✅ Image successfully pushed to GAR" >> $GITHUB_STEP_SUMMARY
+            echo "✅ Image successfully pushed to DockerHub" >> $GITHUB_STEP_SUMMARY
           fi
