@@ -54,8 +54,8 @@ Testkube helm chart to deploy Minio instance needed to store artifacts generated
 | auth.useSecret | bool | `true` | Controls creation and usage of a Kubernetes secret for root credentials. Disable when credentials are injected by another mechanism. |
 | automountServiceAccountToken | bool | `false` |  |
 | clientImage.digest | string | `""` |  |
-| clientImage.registry | string | `"us-east1-docker.pkg.dev"` |  |
-| clientImage.repository | string | `"testkube-cloud-372110/testkube/minio"` |  |
+| clientImage.registry | string | `"docker.io"` |  |
+| clientImage.repository | string | `"kubeshop/testkube-minio"` |  |
 | clientImage.tag | float | `2025.1` |  |
 | clusterDomain | string | `"cluster.local"` |  |
 | command | list | `[]` |  |
@@ -99,8 +99,8 @@ Testkube helm chart to deploy Minio instance needed to store artifacts generated
 | image.digest | string | `""` |  |
 | image.pullPolicy | string | `"IfNotPresent"` |  |
 | image.pullSecrets | list | `[]` |  |
-| image.registry | string | `"us-east1-docker.pkg.dev"` |  |
-| image.repository | string | `"testkube-cloud-372110/testkube/minio"` |  |
+| image.registry | string | `"docker.io"` |  |
+| image.repository | string | `"kubeshop/testkube-minio"` |  |
 | image.tag | float | `2025.1` |  |
 | ingress.annotations | object | `{}` |  |
 | ingress.apiVersion | string | `""` |  |
