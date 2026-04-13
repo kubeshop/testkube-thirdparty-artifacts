@@ -47,9 +47,9 @@ The system automatically checks for new MinIO versions and creates PRs when upda
 │     └── Generate PR description with OpenAI                            │
 │     └── Create PR with labels: [minio, automated, tests-passed]        │
 │                                                                         │
-│  4. PUSH TO GAR (when PR is merged)                                     │
+│  4. PUSH TO DOCKER HUB (when PR is merged)                              │
 │     └── Build final image                                              │
-│     └── Push to us-east1-docker.pkg.dev/testkube-cloud-372110/testkube │
+│     └── Push to docker.io/kubeshop/testkube-minio                      │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -110,7 +110,7 @@ source: dockerhub
 source_image: minio/minio
 version_pattern: "RELEASE\\.[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}-[0-9]{2}-[0-9]{2}Z"
 dockerfile: minio-release.dockerfile
-gar_image: us-east1-docker.pkg.dev/testkube-cloud-372110/testkube/minio
+dockerhub_image: docker.io/kubeshop/testkube-minio
 ```
 
 ### minio.values.yaml (for testing)
@@ -143,13 +143,13 @@ defaultBuckets: "testkube-artifacts"
 # Build image
 docker build -t testkube/minio:latest -f minio-release.dockerfile .
 
-# Tag for GAR
+# Tag for Docker Hub
 docker tag testkube/minio:latest \
-  us-east1-docker.pkg.dev/testkube-cloud-372110/testkube/minio:2025.10
+  docker.io/kubeshop/testkube-minio:2025.10
 
-# Push (requires gcloud auth)
-gcloud auth configure-docker us-east1-docker.pkg.dev
-docker push us-east1-docker.pkg.dev/testkube-cloud-372110/testkube/minio:2025.10
+# Push (requires Docker Hub auth)
+docker login
+docker push docker.io/kubeshop/testkube-minio:2025.10
 ```
 
 ## 📊 Helm Chart
@@ -192,4 +192,3 @@ testkube-api:
 - [MinIO Documentation](https://min.io/docs/minio/linux/index.html)
 - [Testkube Documentation](https://docs.testkube.io/)
 - [Bitnami MinIO Chart](https://github.com/bitnami/charts/tree/main/bitnami/minio)
-
