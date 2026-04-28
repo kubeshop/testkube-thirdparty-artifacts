@@ -7,5 +7,6 @@ FROM postgres:18.3
 LABEL maintainer="Testkube Team" \
       description="PostgreSQL - Testkube Edition"
 
-# Add any custom configurations here if needed
+COPY initdb/ /docker-entrypoint-initdb.d/
+RUN chmod +x /docker-entrypoint-initdb.d/*.sh
 
