@@ -12,6 +12,7 @@ on:
           - mongodb
           - postgresql
           - kubectl
+          - seaweed
       version_suffix:
         description: 'Version suffix (e.g., -debug, -hotfix). Leave empty for base version from Chart.yaml'
         required: false
@@ -66,6 +67,7 @@ jobs:
             mongodb)    echo "image=kubeshop/bitnami-mongodb" >> "$GITHUB_OUTPUT" ;;
             postgresql) echo "image=kubeshop/testkube-postgres" >> "$GITHUB_OUTPUT" ;;
             kubectl)    echo "image=kubeshop/testkube-kubectl" >> "$GITHUB_OUTPUT" ;;
+            seaweed)   echo "image=kubeshop/testkube-seaweedfs" >> "$GITHUB_OUTPUT" ;;
             *)          echo "Unknown service: ${{ inputs.service }}"; exit 1 ;;
           esac
       

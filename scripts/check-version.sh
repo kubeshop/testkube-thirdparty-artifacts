@@ -9,7 +9,7 @@ UPDATE_FILES=false
 
 if [ -z "$SERVICE_NAME" ]; then
   echo "Usage: $0 <service_name> [--update-files]"
-  echo "Services: minio, mongodb, postgresql, kubectl"
+  echo "Services: minio, mongodb, postgresql, kubectl, seaweed"
   exit 1
 fi
 
@@ -97,6 +97,10 @@ get_latest_version_dockerhub() {
     kubectl)
       # kubectl uses X.Y.Z format
       version=$(curl -s "$api_url" | jq -r '.results[] | select(.name | test("^[0-9]+\\.[0-9]+\\.[0-9]+$")) | .name' | sort -V | tail -n 1)
+      ;;
+    seaweed)
+      # SeaweedFS stable tags use X.Y format (skip flavor-specific suffix tags)
+      version=$(curl -s "$api_url" | jq -r '.results[] | select(.name | test("^[0-9]+\\.[0-9]+$")) | .name' | sort -V | tail -n 1)
       ;;
     *)
       echo "Unknown service: $SERVICE_NAME" >&2
@@ -215,6 +219,10 @@ update_dockerfile() {
     kubectl)
       # Update FROM alpine/kubectl:X.Y.Z line directly (ARG before FROM has issues with some build drivers)
       sed -i.bak "s|^FROM alpine/kubectl:.*|FROM alpine/kubectl:${new_version}|" "$dockerfile"
+      ;;
+    seaweed)
+      # Update FROM chrislusf/seaweedfs:X.Y line directly
+      sed -i.bak "s|^FROM chrislusf/seaweedfs:.*|FROM chrislusf/seaweedfs:${new_version}|" "$dockerfile"
       ;;
   esac
   

@@ -1,0 +1,18 @@
+annotations:
+  category: Infrastructure
+  images: |
+    - name: seaweedfs
+      image: docker.io/kubeshop/testkube-seaweedfs:4.23
+  licenses: Apache-2.0
+apiVersion: v2
+appVersion: "4.23"
+description: Testkube helm chart metadata for SeaweedFS artifact versioning.
+maintainers:
+- name: Testkube
+  email: support@testkube.io
+  url: https://github.com/kubeshop/testkube-thirdparty-artifacts
+name: seaweed
+sources:
+- https://github.com/kubeshop/testkube-thirdparty-artifacts/tree/main/seaweed
+- https://github.com/seaweedfs/seaweedfs
+version: 4.23-0

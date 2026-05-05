@@ -33,7 +33,7 @@ jobs:
         run: |
           PUBLISHED_CHARTS=""
           
-          for chart in minio mongodb postgresql kubectl; do
+          for chart in minio mongodb postgresql kubectl seaweed; do
             # Check if helm chart exists for this service
             if [ -d "$chart/helm" ]; then
               echo "=== Processing $chart helm chart ==="
@@ -70,7 +70,7 @@ jobs:
           echo "| Chart | Status |" >> $GITHUB_STEP_SUMMARY
           echo "|-------|--------|" >> $GITHUB_STEP_SUMMARY
           
-          for chart in minio mongodb postgresql kubectl; do
+          for chart in minio mongodb postgresql kubectl seaweed; do
             if [ -d "$chart/helm" ]; then
               echo "| $chart | ✅ Published |" >> $GITHUB_STEP_SUMMARY
             else

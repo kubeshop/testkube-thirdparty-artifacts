@@ -35,6 +35,8 @@ jobs:
             SERVICE="postgresql"
           elif echo "$LABELS" | grep -q '"kubectl"'; then
             SERVICE="kubectl"
+          elif echo "$LABELS" | grep -q '"seaweed"'; then
+            SERVICE="seaweed"
           else
             echo "No service label found"
             exit 0

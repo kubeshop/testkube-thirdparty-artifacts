@@ -19,7 +19,7 @@ while [[ $# -gt 0 ]]; do
       echo "Usage: $0 --service <name> --current-version <ver> --new-version <ver> --output <file>"
       echo ""
       echo "Options:"
-      echo "  --service          Service name (minio, mongodb, postgresql, kubectl)"
+      echo "  --service          Service name (minio, mongodb, postgresql, kubectl, seaweed)"
       echo "  --current-version  Current version"
       echo "  --new-version      New version"
       echo "  --output           Output file path"
@@ -74,6 +74,14 @@ get_service_config() {
       DOCS_URL="https://kubernetes.io/docs/reference/kubectl/"
       SEMANTIC_VERSION="$NEW_VERSION"
       VERSION_VAR="KUBECTL_VERSION"
+      ;;
+    seaweed)
+      GITHUB_REPO="seaweedfs/seaweedfs"
+      DOCKER_IMAGE="chrislusf/seaweedfs"
+      DISPLAY_NAME="SeaweedFS"
+      DOCS_URL="https://github.com/seaweedfs/seaweedfs/releases"
+      SEMANTIC_VERSION="$NEW_VERSION"
+      VERSION_VAR="SEAWEEDFS_VERSION"
       ;;
     *)
       echo "Error: Unknown service: $SERVICE_NAME"
@@ -198,6 +206,7 @@ case "$SERVICE_NAME" in
   mongodb) DOCKERFILE="mongo-8.dockerfile" ;;
   postgresql) DOCKERFILE="postgresql-release.dockerfile" ;;
   kubectl) DOCKERFILE="kubectl-release.dockerfile" ;;
+  seaweed) DOCKERFILE="seaweedfs-release.dockerfile" ;;
 esac
 
 # Build final PR description
