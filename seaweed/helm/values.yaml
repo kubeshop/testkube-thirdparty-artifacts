@@ -1,0 +1,12 @@
+# SeaweedFS chart defaults for Testkube-managed artifacts.
+# This chart wraps upstream SeaweedFS and pins our tested image by default.
+
+global:
+  seaweedfs:
+    image:
+      # Use Testkube-managed SeaweedFS image for reproducibility and patch control.
+      name: kubeshop/testkube-seaweedfs
+
+filer:
+  s3:
+    enabled: true
