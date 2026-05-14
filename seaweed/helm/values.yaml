@@ -10,3 +10,6 @@ global:
 filer:
   s3:
     enabled: true
+
+# Example overrides for securityContext / labels / annotations / tolerations:
+# see `values-example-overrides.yaml`
