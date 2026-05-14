@@ -1,1 +1,0 @@
-SeaweedFS chart is ready.

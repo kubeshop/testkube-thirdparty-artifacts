@@ -6,10 +6,6 @@ annotations:
   licenses: Apache-2.0
 apiVersion: v2
 appVersion: "4.23"
-dependencies:
-  - name: seaweedfs
-    version: 4.22.0
-    repository: https://seaweedfs.github.io/seaweedfs/helm
 description: Testkube helm chart to deploy SeaweedFS as an S3-compatible storage backend.
 maintainers:
 - name: Testkube
