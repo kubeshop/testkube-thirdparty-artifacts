@@ -1,5 +1,5 @@
 group "default" {
-  targets = [ "minio", "mongodb", "postgresql", "kubectl" ]
+  targets = [ "minio", "mongodb", "postgresql", "kubectl", "seaweed" ]
 }
 
 target "minio-meta" {}
@@ -31,5 +31,13 @@ target "kubectl" {
   inherits = ["kubectl-meta"]
   context= "./kubectl"
   dockerfile = "kubectl-release.dockerfile"
+  platforms = ["linux/arm64", "linux/amd64"]
+}
+
+target "seaweed-meta" {}
+target "seaweed" {
+  inherits = ["seaweed-meta"]
+  context= "./seaweed"
+  dockerfile = "seaweedfs-release.dockerfile"
   platforms = ["linux/arm64", "linux/amd64"]
 }

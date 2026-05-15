@@ -7,6 +7,7 @@ on:
       - 'mongodb-*'
       - 'postgresql-*'
       - 'kubectl-*'
+      - 'seaweed-*'
 
 concurrency: ${{ github.workflow }}-${{ github.ref }}
 
@@ -34,6 +35,7 @@ jobs:
             mongodb-*)    echo "target=mongodb" >> "$GITHUB_OUTPUT" ;;
             postgresql-*) echo "target=postgresql" >> "$GITHUB_OUTPUT" ;;
             kubectl-*)    echo "target=kubectl" >> "$GITHUB_OUTPUT" ;;
+            seaweed-*)    echo "target=seaweed" >> "$GITHUB_OUTPUT" ;;
             *)            echo "Unknown tag prefix"; exit 1 ;;
           esac
       
@@ -46,6 +48,7 @@ jobs:
             mongodb-*)    echo "tag=${ref#mongodb-}" >> "$GITHUB_OUTPUT" ;;
             postgresql-*) echo "tag=${ref#postgresql-}" >> "$GITHUB_OUTPUT" ;;
             kubectl-*)    echo "tag=${ref#kubectl-}" >> "$GITHUB_OUTPUT" ;;
+            seaweed-*)    echo "tag=${ref#seaweed-}" >> "$GITHUB_OUTPUT" ;;
           esac
       
       # MinIO metadata
@@ -96,6 +99,18 @@ jobs:
           tags: |
             type=raw,value=${{ steps.version.outputs.tag }}
       
+      # SeaweedFS metadata
+      - name: Create Docker tags and metadata for SeaweedFS
+        if: startsWith(github.ref_name, 'seaweed')
+        id: seaweed
+        uses: docker/metadata-action@v5
+        with:
+          bake-target: 'seaweed'
+          images: |
+            kubeshop/testkube-seaweedfs
+          tags: |
+            type=raw,value=${{ steps.version.outputs.tag }}
+      
       - name: Build and push image
         uses: depot/bake-action@v1.12.1
         with:
@@ -107,6 +122,7 @@ jobs:
             ${{ steps.mongodb.outputs.bake-file }}
             ${{ steps.postgresql.outputs.bake-file }}
             ${{ steps.kubectl.outputs.bake-file }}
+            ${{ steps.seaweed.outputs.bake-file }}
           push: true
       
       - name: Summary

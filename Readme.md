@@ -18,6 +18,7 @@ ensuring that Testkube provides secure and reliable versions of these platforms 
 * [MongoDB](./mongodb/).
 * [PostgreSQL](./postgresql/).
 * [Kubectl](./kubectl/).
+* [SeaweedFS](./seaweed/).
 
 ## Automation overview
 
@@ -67,6 +68,7 @@ Review & Merge
 * `mongodb-`
 * `postgresql-`
 * `kubectl-`
+* `seaweed-`
 
 ## Processes to manage artifacts into this repository
 

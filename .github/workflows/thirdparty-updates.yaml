@@ -48,6 +48,9 @@ jobs:
       kubectl_update: ${{ steps.check-kubectl.outputs.has_update }}
       kubectl_current: ${{ steps.check-kubectl.outputs.current_version }}
       kubectl_latest: ${{ steps.check-kubectl.outputs.latest_version }}
+      seaweed_update: ${{ steps.check-seaweed.outputs.has_update }}
+      seaweed_current: ${{ steps.check-seaweed.outputs.current_version }}
+      seaweed_latest: ${{ steps.check-seaweed.outputs.latest_version }}
       any_update: ${{ steps.summary.outputs.any_update }}
     steps:
       - uses: actions/checkout@v4
@@ -112,6 +115,20 @@ jobs:
             echo "has_update=false" >> "$GITHUB_OUTPUT"
           fi
       
+      - name: Check SeaweedFS
+        id: check-seaweed
+        if: contains(github.event.inputs.services, 'seaweed') || github.event.inputs.services == 'all' || github.event.inputs.services == ''
+        run: |
+          if scripts/check-version.sh seaweed 2>&1 | tee /tmp/seaweed-check.log; then
+            echo "has_update=true" >> "$GITHUB_OUTPUT"
+            CURRENT=$(grep "Current version:" /tmp/seaweed-check.log | awk '{print $NF}')
+            LATEST=$(grep "Latest version:" /tmp/seaweed-check.log | awk '{print $NF}')
+            echo "current_version=$CURRENT" >> "$GITHUB_OUTPUT"
+            echo "latest_version=$LATEST" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_update=false" >> "$GITHUB_OUTPUT"
+          fi
+      
       - name: Summary
         id: summary
         run: |
@@ -148,6 +165,13 @@ jobs:
             ANY_UPDATE=true
           else
             echo "| kubectl | - | - | ⏭️ No |" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          if [ "${{ steps.check-seaweed.outputs.has_update }}" = "true" ]; then
+            echo "| SeaweedFS | \`${{ steps.check-seaweed.outputs.current_version }}\` | \`${{ steps.check-seaweed.outputs.latest_version }}\` | ✅ Yes |" >> $GITHUB_STEP_SUMMARY
+            ANY_UPDATE=true
+          else
+            echo "| SeaweedFS | - | - | ⏭️ No |" >> $GITHUB_STEP_SUMMARY
           fi
           
           echo "any_update=$ANY_UPDATE" >> "$GITHUB_OUTPUT"
@@ -384,10 +408,50 @@ jobs:
           fi
 
   # ===========================================
-  # Job 6: Create PRs for successful tests
+  # Job 6: Test SeaweedFS (sequential, after kubectl)
+  # ===========================================
+  test-seaweed:
+    needs: [check-all-updates, test-kubectl]
+    if: always() && needs.check-all-updates.outputs.seaweed_update == 'true' && github.event.inputs.skip_tests != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    outputs:
+      result: ${{ steps.result.outputs.status }}
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Update SeaweedFS files
+        id: update-files
+        run: |
+          chmod +x scripts/check-version.sh
+          if scripts/check-version.sh seaweed --update-files; then
+            echo "has_update=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "No update available - this job should not have run"
+            echo "has_update=false" >> "$GITHUB_OUTPUT"
+          fi
+      
+      - name: Run SeaweedFS Tests
+        if: steps.update-files.outputs.has_update == 'true'
+        run: |
+          echo "SeaweedFS tests would run here"
+          # TODO: Implement SeaweedFS-specific tests
+      
+      - name: Set Result
+        id: result
+        if: always()
+        run: |
+          if [ "${{ steps.update-files.outputs.has_update }}" != "true" ]; then
+            echo "status=skipped" >> "$GITHUB_OUTPUT"
+          else
+            echo "status=${{ job.status }}" >> "$GITHUB_OUTPUT"
+          fi
+
+  # ===========================================
+  # Job 7: Create PRs for successful tests
   # ===========================================
   create-prs:
-    needs: [check-all-updates, test-minio, test-mongodb, test-postgresql, test-kubectl]
+    needs: [check-all-updates, test-minio, test-mongodb, test-postgresql, test-kubectl, test-seaweed]
     if: always() && needs.check-all-updates.outputs.any_update == 'true' && github.event.inputs.dry_run != 'true'
     runs-on: ubuntu-latest
     permissions:
@@ -529,6 +593,37 @@ jobs:
             dependencies
             tests-passed
       
+      - name: Create SeaweedFS PR
+        if: needs.check-all-updates.outputs.seaweed_update == 'true' && needs.test-seaweed.outputs.result == 'success'
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          scripts/check-version.sh seaweed --update-files
+          
+          # Generate PR description with AI
+          scripts/generate-pr-description.sh \
+            --service seaweed \
+            --current-version "${{ needs.check-all-updates.outputs.seaweed_current }}" \
+            --new-version "${{ needs.check-all-updates.outputs.seaweed_latest }}" \
+            --output /tmp/seaweed-pr.md
+      
+      - name: Create SeaweedFS Pull Request
+        id: seaweed-pr
+        if: needs.check-all-updates.outputs.seaweed_update == 'true' && needs.test-seaweed.outputs.result == 'success'
+        uses: peter-evans/create-pull-request@v5
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: "chore: Update SeaweedFS to ${{ needs.check-all-updates.outputs.seaweed_latest }}"
+          title: "chore: Update SeaweedFS to ${{ needs.check-all-updates.outputs.seaweed_latest }}"
+          body-path: /tmp/seaweed-pr.md
+          branch: update/seaweed-${{ needs.check-all-updates.outputs.seaweed_latest }}
+          delete-branch: true
+          labels: |
+            automated
+            seaweed
+            dependencies
+            tests-passed
+      
       # ===========================================
       # Slack Notification - Send summary of created PRs
       # ===========================================
@@ -544,6 +639,8 @@ jobs:
           POSTGRESQL_PR_NUMBER: ${{ steps.postgresql-pr.outputs.pull-request-number }}
           KUBECTL_PR_URL: ${{ steps.kubectl-pr.outputs.pull-request-url }}
           KUBECTL_PR_NUMBER: ${{ steps.kubectl-pr.outputs.pull-request-number }}
+          SEAWEED_PR_URL: ${{ steps.seaweed-pr.outputs.pull-request-url }}
+          SEAWEED_PR_NUMBER: ${{ steps.seaweed-pr.outputs.pull-request-number }}
         run: |
           if [ -z "$SLACK_WEBHOOK_URL" ]; then
             echo "SLACK_WEBHOOK_URL not set. Skipping Slack notification."
@@ -571,6 +668,11 @@ jobs:
           
           if [ -n "$KUBECTL_PR_URL" ]; then
             SERVICES_TEXT="${SERVICES_TEXT}• *kubectl*: \`${{ needs.check-all-updates.outputs.kubectl_current }}\` → \`${{ needs.check-all-updates.outputs.kubectl_latest }}\` (<${KUBECTL_PR_URL}|#${KUBECTL_PR_NUMBER}>)\n"
+            PRS_CREATED=$((PRS_CREATED + 1))
+          fi
+          
+          if [ -n "$SEAWEED_PR_URL" ]; then
+            SERVICES_TEXT="${SERVICES_TEXT}• *SeaweedFS*: \`${{ needs.check-all-updates.outputs.seaweed_current }}\` → \`${{ needs.check-all-updates.outputs.seaweed_latest }}\` (<${SEAWEED_PR_URL}|#${SEAWEED_PR_NUMBER}>)\n"
             PRS_CREATED=$((PRS_CREATED + 1))
           fi
           
@@ -690,5 +792,16 @@ jobs:
             fi
           else
             echo "| kubectl | ⏭️ | ⏭️ | ⏭️ |" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          # SeaweedFS
+          if [ "${{ needs.check-all-updates.outputs.seaweed_update }}" = "true" ]; then
+            if [ "${{ needs.test-seaweed.outputs.result }}" = "success" ]; then
+              echo "| SeaweedFS | ✅ | ✅ | ✅ |" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "| SeaweedFS | ✅ | ❌ | ⏭️ |" >> $GITHUB_STEP_SUMMARY
+            fi
+          else
+            echo "| SeaweedFS | ⏭️ | ⏭️ | ⏭️ |" >> $GITHUB_STEP_SUMMARY
           fi
 

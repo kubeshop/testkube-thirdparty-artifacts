@@ -1,0 +1,8 @@
+# SeaweedFS Service Configuration
+name: seaweed
+display_name: SeaweedFS
+source: dockerhub
+source_image: chrislusf/seaweedfs
+version_pattern: "^[0-9]+\\.[0-9]+$"
+dockerfile: seaweedfs-release.dockerfile
+dockerhub_image: docker.io/kubeshop/testkube-seaweedfs
