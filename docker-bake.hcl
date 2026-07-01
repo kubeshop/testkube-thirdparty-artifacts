@@ -1,5 +1,5 @@
 group "default" {
-  targets = [ "minio", "mongodb", "postgresql", "kubectl", "seaweed" ]
+  targets = [ "minio", "mongodb", "postgresql", "kubectl", "seaweed", "dex", "nats" ]
 }
 
 target "minio-meta" {}
@@ -39,5 +39,21 @@ target "seaweed" {
   inherits = ["seaweed-meta"]
   context= "./seaweed"
   dockerfile = "seaweedfs-release.dockerfile"
+  platforms = ["linux/arm64", "linux/amd64"]
+}
+
+target "dex-meta" {}
+target "dex" {
+  inherits = ["dex-meta"]
+  context= "./dex"
+  dockerfile = "dex-release.dockerfile"
+  platforms = ["linux/arm64", "linux/amd64"]
+}
+
+target "nats-meta" {}
+target "nats" {
+  inherits = ["nats-meta"]
+  context= "./nats"
+  dockerfile = "nats-release.dockerfile"
   platforms = ["linux/arm64", "linux/amd64"]
 }

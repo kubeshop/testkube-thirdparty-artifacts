@@ -19,6 +19,8 @@ ensuring that Testkube provides secure and reliable versions of these platforms 
 * [PostgreSQL](./postgresql/).
 * [Kubectl](./kubectl/).
 * [SeaweedFS](./seaweed/).
+* [Dex](./dex/).
+* [NATS](./nats/).
 
 ## Automation overview
 
@@ -69,6 +71,8 @@ Review & Merge
 * `postgresql-`
 * `kubectl-`
 * `seaweed-`
+* `dex-`
+* `nats-`
 
 ## Processes to manage artifacts into this repository
 

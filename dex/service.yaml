@@ -1,0 +1,8 @@
+# Dex Service Configuration
+name: dex
+display_name: Dex
+source: dockerhub
+source_image: dexidp/dex
+version_pattern: "^v[0-9]+\\.[0-9]+\\.[0-9]+$"
+dockerfile: dex-release.dockerfile
+dockerhub_image: docker.io/kubeshop/dex

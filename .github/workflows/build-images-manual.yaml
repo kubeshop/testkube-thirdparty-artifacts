@@ -13,6 +13,8 @@ on:
           - postgresql
           - kubectl
           - seaweed
+          - dex
+          - nats
       version_suffix:
         description: 'Version suffix (e.g., -debug, -hotfix). Leave empty for base version from Chart.yaml'
         required: false
@@ -68,6 +70,8 @@ jobs:
             postgresql) echo "image=kubeshop/testkube-postgres" >> "$GITHUB_OUTPUT" ;;
             kubectl)    echo "image=kubeshop/testkube-kubectl" >> "$GITHUB_OUTPUT" ;;
             seaweed)   echo "image=kubeshop/testkube-seaweedfs" >> "$GITHUB_OUTPUT" ;;
+            dex)        echo "image=kubeshop/dex" >> "$GITHUB_OUTPUT" ;;
+            nats)       echo "image=kubeshop/testkube-nats" >> "$GITHUB_OUTPUT" ;;
             *)          echo "Unknown service: ${{ inputs.service }}"; exit 1 ;;
           esac
       

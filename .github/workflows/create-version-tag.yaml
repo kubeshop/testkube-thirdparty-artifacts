@@ -37,6 +37,10 @@ jobs:
             SERVICE="kubectl"
           elif echo "$LABELS" | grep -q '"seaweed"'; then
             SERVICE="seaweed"
+          elif echo "$LABELS" | grep -q '"dex"'; then
+            SERVICE="dex"
+          elif echo "$LABELS" | grep -q '"nats"'; then
+            SERVICE="nats"
           else
             echo "No service label found"
             exit 0

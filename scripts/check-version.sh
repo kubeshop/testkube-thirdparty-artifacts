@@ -9,7 +9,7 @@ UPDATE_FILES=false
 
 if [ -z "$SERVICE_NAME" ]; then
   echo "Usage: $0 <service_name> [--update-files]"
-  echo "Services: minio, mongodb, postgresql, kubectl, seaweed"
+  echo "Services: minio, mongodb, postgresql, kubectl, seaweed, dex, nats"
   exit 1
 fi
 
@@ -102,6 +102,14 @@ get_latest_version_dockerhub() {
       # SeaweedFS stable tags use X.Y format (skip flavor-specific suffix tags)
       version=$(curl -s "$api_url" | jq -r '.results[] | select(.name | test("^[0-9]+\\.[0-9]+$")) | .name' | sort -V | tail -n 1)
       ;;
+    dex)
+      # Dex uses vX.Y.Z format (ignore -alpine/-distroless variant tags)
+      version=$(curl -s "$api_url" | jq -r '.results[] | select(.name | test("^v[0-9]+\\.[0-9]+\\.[0-9]+$")) | .name' | sort -V | tail -n 1)
+      ;;
+    nats)
+      # NATS uses X.Y.Z-alpine format (we track the alpine variant)
+      version=$(curl -s "$api_url" | jq -r '.results[] | select(.name | test("^[0-9]+\\.[0-9]+\\.[0-9]+-alpine$")) | .name' | sort -V | tail -n 1)
+      ;;
     *)
       echo "Unknown service: $SERVICE_NAME" >&2
       return 1
@@ -126,12 +134,28 @@ minio_to_semantic() {
   fi
 }
 
+# Convert Dex version to semantic (strip leading "v")
+dex_to_semantic() {
+  echo "${1#v}"
+}
+
+# Convert NATS version to semantic (strip "-alpine" suffix)
+nats_to_semantic() {
+  echo "${1%-alpine}"
+}
+
 # Get semantic version for Chart.yaml
 get_semantic_version() {
   local version="$1"
   case "$SERVICE_NAME" in
     minio)
       minio_to_semantic "$version"
+      ;;
+    dex)
+      dex_to_semantic "$version"
+      ;;
+    nats)
+      nats_to_semantic "$version"
       ;;
     *)
       echo "$version"
@@ -223,6 +247,15 @@ update_dockerfile() {
     seaweed)
       # Update FROM chrislusf/seaweedfs:X.Y line directly
       sed -i.bak "s|^FROM chrislusf/seaweedfs:.*|FROM chrislusf/seaweedfs:${new_version}|" "$dockerfile"
+      ;;
+    dex)
+      # Update the ARG DEX_VERSION (used both for the source checkout and the
+      # final alpine base image tag).
+      sed -i.bak "s|^ARG DEX_VERSION=.*|ARG DEX_VERSION=${new_version}|" "$dockerfile"
+      ;;
+    nats)
+      # Update FROM nats:X.Y.Z-alpine line directly
+      sed -i.bak "s|^FROM nats:.*|FROM nats:${new_version}|" "$dockerfile"
       ;;
   esac
   

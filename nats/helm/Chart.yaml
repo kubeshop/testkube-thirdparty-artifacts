@@ -1,0 +1,18 @@
+annotations:
+  category: Infrastructure
+  images: |
+    - name: nats
+      image: docker.io/kubeshop/testkube-nats:2.14.3
+  licenses: Apache-2.0
+apiVersion: v2
+appVersion: "2.14.3"
+description: Testkube NATS image, the messaging system used by the Testkube control plane.
+maintainers:
+- name: Testkube
+  email: support@testkube.io
+  url: https://github.com/kubeshop/testkube-thirdparty-artifacts
+name: nats
+sources:
+- https://github.com/kubeshop/testkube-thirdparty-artifacts/tree/main/nats
+- https://github.com/nats-io/nats-server
+version: 2.14.3-0

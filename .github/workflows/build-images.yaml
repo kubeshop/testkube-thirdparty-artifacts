@@ -8,6 +8,8 @@ on:
       - 'postgresql-*'
       - 'kubectl-*'
       - 'seaweed-*'
+      - 'dex-*'
+      - 'nats-*'
 
 concurrency: ${{ github.workflow }}-${{ github.ref }}
 
@@ -36,6 +38,8 @@ jobs:
             postgresql-*) echo "target=postgresql" >> "$GITHUB_OUTPUT" ;;
             kubectl-*)    echo "target=kubectl" >> "$GITHUB_OUTPUT" ;;
             seaweed-*)    echo "target=seaweed" >> "$GITHUB_OUTPUT" ;;
+            dex-*)        echo "target=dex" >> "$GITHUB_OUTPUT" ;;
+            nats-*)       echo "target=nats" >> "$GITHUB_OUTPUT" ;;
             *)            echo "Unknown tag prefix"; exit 1 ;;
           esac
       
@@ -49,6 +53,8 @@ jobs:
             postgresql-*) echo "tag=${ref#postgresql-}" >> "$GITHUB_OUTPUT" ;;
             kubectl-*)    echo "tag=${ref#kubectl-}" >> "$GITHUB_OUTPUT" ;;
             seaweed-*)    echo "tag=${ref#seaweed-}" >> "$GITHUB_OUTPUT" ;;
+            dex-*)        echo "tag=${ref#dex-}" >> "$GITHUB_OUTPUT" ;;
+            nats-*)       echo "tag=${ref#nats-}" >> "$GITHUB_OUTPUT" ;;
           esac
       
       # MinIO metadata
@@ -111,6 +117,30 @@ jobs:
           tags: |
             type=raw,value=${{ steps.version.outputs.tag }}
       
+      # Dex metadata
+      - name: Create Docker tags and metadata for Dex
+        if: startsWith(github.ref_name, 'dex')
+        id: dex
+        uses: docker/metadata-action@v5
+        with:
+          bake-target: 'dex'
+          images: |
+            kubeshop/dex
+          tags: |
+            type=raw,value=${{ steps.version.outputs.tag }}
+      
+      # NATS metadata
+      - name: Create Docker tags and metadata for NATS
+        if: startsWith(github.ref_name, 'nats')
+        id: nats
+        uses: docker/metadata-action@v5
+        with:
+          bake-target: 'nats'
+          images: |
+            kubeshop/testkube-nats
+          tags: |
+            type=raw,value=${{ steps.version.outputs.tag }}
+      
       - name: Build and push image
         uses: depot/bake-action@v1.12.1
         with:
@@ -123,6 +153,8 @@ jobs:
             ${{ steps.postgresql.outputs.bake-file }}
             ${{ steps.kubectl.outputs.bake-file }}
             ${{ steps.seaweed.outputs.bake-file }}
+            ${{ steps.dex.outputs.bake-file }}
+            ${{ steps.nats.outputs.bake-file }}
           push: true
       
       - name: Summary

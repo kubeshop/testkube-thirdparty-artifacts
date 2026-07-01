@@ -1,0 +1,18 @@
+annotations:
+  category: Authentication
+  images: |
+    - name: dex
+      image: docker.io/kubeshop/dex:2.45.1
+  licenses: Apache-2.0
+apiVersion: v2
+appVersion: "2.45.1"
+description: Testkube Dex image, the OpenID Connect identity provider used by the Testkube control plane.
+maintainers:
+- name: Testkube
+  email: support@testkube.io
+  url: https://github.com/kubeshop/testkube-thirdparty-artifacts
+name: dex
+sources:
+- https://github.com/kubeshop/testkube-thirdparty-artifacts/tree/main/dex
+- https://github.com/dexidp/dex
+version: 2.45.1-0

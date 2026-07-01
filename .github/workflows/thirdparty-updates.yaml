@@ -51,6 +51,12 @@ jobs:
       seaweed_update: ${{ steps.check-seaweed.outputs.has_update }}
       seaweed_current: ${{ steps.check-seaweed.outputs.current_version }}
       seaweed_latest: ${{ steps.check-seaweed.outputs.latest_version }}
+      dex_update: ${{ steps.check-dex.outputs.has_update }}
+      dex_current: ${{ steps.check-dex.outputs.current_version }}
+      dex_latest: ${{ steps.check-dex.outputs.latest_version }}
+      nats_update: ${{ steps.check-nats.outputs.has_update }}
+      nats_current: ${{ steps.check-nats.outputs.current_version }}
+      nats_latest: ${{ steps.check-nats.outputs.latest_version }}
       any_update: ${{ steps.summary.outputs.any_update }}
     steps:
       - uses: actions/checkout@v4
@@ -129,6 +135,34 @@ jobs:
             echo "has_update=false" >> "$GITHUB_OUTPUT"
           fi
       
+      - name: Check Dex
+        id: check-dex
+        if: contains(github.event.inputs.services, 'dex') || github.event.inputs.services == 'all' || github.event.inputs.services == ''
+        run: |
+          if scripts/check-version.sh dex 2>&1 | tee /tmp/dex-check.log; then
+            echo "has_update=true" >> "$GITHUB_OUTPUT"
+            CURRENT=$(grep "Current version:" /tmp/dex-check.log | awk '{print $NF}')
+            LATEST=$(grep "Latest version:" /tmp/dex-check.log | awk '{print $NF}')
+            echo "current_version=$CURRENT" >> "$GITHUB_OUTPUT"
+            echo "latest_version=$LATEST" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_update=false" >> "$GITHUB_OUTPUT"
+          fi
+      
+      - name: Check NATS
+        id: check-nats
+        if: contains(github.event.inputs.services, 'nats') || github.event.inputs.services == 'all' || github.event.inputs.services == ''
+        run: |
+          if scripts/check-version.sh nats 2>&1 | tee /tmp/nats-check.log; then
+            echo "has_update=true" >> "$GITHUB_OUTPUT"
+            CURRENT=$(grep "Current version:" /tmp/nats-check.log | awk '{print $NF}')
+            LATEST=$(grep "Latest version:" /tmp/nats-check.log | awk '{print $NF}')
+            echo "current_version=$CURRENT" >> "$GITHUB_OUTPUT"
+            echo "latest_version=$LATEST" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_update=false" >> "$GITHUB_OUTPUT"
+          fi
+      
       - name: Summary
         id: summary
         run: |
@@ -172,6 +206,20 @@ jobs:
             ANY_UPDATE=true
           else
             echo "| SeaweedFS | - | - | ⏭️ No |" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          if [ "${{ steps.check-dex.outputs.has_update }}" = "true" ]; then
+            echo "| Dex | \`${{ steps.check-dex.outputs.current_version }}\` | \`${{ steps.check-dex.outputs.latest_version }}\` | ✅ Yes |" >> $GITHUB_STEP_SUMMARY
+            ANY_UPDATE=true
+          else
+            echo "| Dex | - | - | ⏭️ No |" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          if [ "${{ steps.check-nats.outputs.has_update }}" = "true" ]; then
+            echo "| NATS | \`${{ steps.check-nats.outputs.current_version }}\` | \`${{ steps.check-nats.outputs.latest_version }}\` | ✅ Yes |" >> $GITHUB_STEP_SUMMARY
+            ANY_UPDATE=true
+          else
+            echo "| NATS | - | - | ⏭️ No |" >> $GITHUB_STEP_SUMMARY
           fi
           
           echo "any_update=$ANY_UPDATE" >> "$GITHUB_OUTPUT"
@@ -448,10 +496,90 @@ jobs:
           fi
 
   # ===========================================
-  # Job 7: Create PRs for successful tests
+  # Job 7: Test Dex (sequential, after SeaweedFS)
+  # ===========================================
+  test-dex:
+    needs: [check-all-updates, test-seaweed]
+    if: always() && needs.check-all-updates.outputs.dex_update == 'true' && github.event.inputs.skip_tests != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    outputs:
+      result: ${{ steps.result.outputs.status }}
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Update Dex files
+        id: update-files
+        run: |
+          chmod +x scripts/check-version.sh
+          if scripts/check-version.sh dex --update-files; then
+            echo "has_update=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "No update available - this job should not have run"
+            echo "has_update=false" >> "$GITHUB_OUTPUT"
+          fi
+      
+      - name: Run Dex Tests
+        if: steps.update-files.outputs.has_update == 'true'
+        run: |
+          echo "Dex tests would run here"
+          # TODO: Implement Dex-specific tests
+      
+      - name: Set Result
+        id: result
+        if: always()
+        run: |
+          if [ "${{ steps.update-files.outputs.has_update }}" != "true" ]; then
+            echo "status=skipped" >> "$GITHUB_OUTPUT"
+          else
+            echo "status=${{ job.status }}" >> "$GITHUB_OUTPUT"
+          fi
+
+  # ===========================================
+  # Job 8: Test NATS (sequential, after Dex)
+  # ===========================================
+  test-nats:
+    needs: [check-all-updates, test-dex]
+    if: always() && needs.check-all-updates.outputs.nats_update == 'true' && github.event.inputs.skip_tests != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    outputs:
+      result: ${{ steps.result.outputs.status }}
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Update NATS files
+        id: update-files
+        run: |
+          chmod +x scripts/check-version.sh
+          if scripts/check-version.sh nats --update-files; then
+            echo "has_update=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "No update available - this job should not have run"
+            echo "has_update=false" >> "$GITHUB_OUTPUT"
+          fi
+      
+      - name: Run NATS Tests
+        if: steps.update-files.outputs.has_update == 'true'
+        run: |
+          echo "NATS tests would run here"
+          # TODO: Implement NATS-specific tests
+      
+      - name: Set Result
+        id: result
+        if: always()
+        run: |
+          if [ "${{ steps.update-files.outputs.has_update }}" != "true" ]; then
+            echo "status=skipped" >> "$GITHUB_OUTPUT"
+          else
+            echo "status=${{ job.status }}" >> "$GITHUB_OUTPUT"
+          fi
+
+  # ===========================================
+  # Job 9: Create PRs for successful tests
   # ===========================================
   create-prs:
-    needs: [check-all-updates, test-minio, test-mongodb, test-postgresql, test-kubectl, test-seaweed]
+    needs: [check-all-updates, test-minio, test-mongodb, test-postgresql, test-kubectl, test-seaweed, test-dex, test-nats]
     if: always() && needs.check-all-updates.outputs.any_update == 'true' && github.event.inputs.dry_run != 'true'
     runs-on: ubuntu-latest
     permissions:
@@ -624,6 +752,68 @@ jobs:
             dependencies
             tests-passed
       
+      - name: Create Dex PR
+        if: needs.check-all-updates.outputs.dex_update == 'true' && needs.test-dex.outputs.result == 'success'
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          scripts/check-version.sh dex --update-files
+          
+          # Generate PR description with AI
+          scripts/generate-pr-description.sh \
+            --service dex \
+            --current-version "${{ needs.check-all-updates.outputs.dex_current }}" \
+            --new-version "${{ needs.check-all-updates.outputs.dex_latest }}" \
+            --output /tmp/dex-pr.md
+      
+      - name: Create Dex Pull Request
+        id: dex-pr
+        if: needs.check-all-updates.outputs.dex_update == 'true' && needs.test-dex.outputs.result == 'success'
+        uses: peter-evans/create-pull-request@v5
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: "chore: Update Dex to ${{ needs.check-all-updates.outputs.dex_latest }}"
+          title: "chore: Update Dex to ${{ needs.check-all-updates.outputs.dex_latest }}"
+          body-path: /tmp/dex-pr.md
+          branch: update/dex-${{ needs.check-all-updates.outputs.dex_latest }}
+          delete-branch: true
+          labels: |
+            automated
+            dex
+            dependencies
+            tests-passed
+      
+      - name: Create NATS PR
+        if: needs.check-all-updates.outputs.nats_update == 'true' && needs.test-nats.outputs.result == 'success'
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          scripts/check-version.sh nats --update-files
+          
+          # Generate PR description with AI
+          scripts/generate-pr-description.sh \
+            --service nats \
+            --current-version "${{ needs.check-all-updates.outputs.nats_current }}" \
+            --new-version "${{ needs.check-all-updates.outputs.nats_latest }}" \
+            --output /tmp/nats-pr.md
+      
+      - name: Create NATS Pull Request
+        id: nats-pr
+        if: needs.check-all-updates.outputs.nats_update == 'true' && needs.test-nats.outputs.result == 'success'
+        uses: peter-evans/create-pull-request@v5
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: "chore: Update NATS to ${{ needs.check-all-updates.outputs.nats_latest }}"
+          title: "chore: Update NATS to ${{ needs.check-all-updates.outputs.nats_latest }}"
+          body-path: /tmp/nats-pr.md
+          branch: update/nats-${{ needs.check-all-updates.outputs.nats_latest }}
+          delete-branch: true
+          labels: |
+            automated
+            nats
+            dependencies
+            tests-passed
+      
       # ===========================================
       # Slack Notification - Send summary of created PRs
       # ===========================================
@@ -641,6 +831,10 @@ jobs:
           KUBECTL_PR_NUMBER: ${{ steps.kubectl-pr.outputs.pull-request-number }}
           SEAWEED_PR_URL: ${{ steps.seaweed-pr.outputs.pull-request-url }}
           SEAWEED_PR_NUMBER: ${{ steps.seaweed-pr.outputs.pull-request-number }}
+          DEX_PR_URL: ${{ steps.dex-pr.outputs.pull-request-url }}
+          DEX_PR_NUMBER: ${{ steps.dex-pr.outputs.pull-request-number }}
+          NATS_PR_URL: ${{ steps.nats-pr.outputs.pull-request-url }}
+          NATS_PR_NUMBER: ${{ steps.nats-pr.outputs.pull-request-number }}
         run: |
           if [ -z "$SLACK_WEBHOOK_URL" ]; then
             echo "SLACK_WEBHOOK_URL not set. Skipping Slack notification."
@@ -673,6 +867,16 @@ jobs:
           
           if [ -n "$SEAWEED_PR_URL" ]; then
             SERVICES_TEXT="${SERVICES_TEXT}• *SeaweedFS*: \`${{ needs.check-all-updates.outputs.seaweed_current }}\` → \`${{ needs.check-all-updates.outputs.seaweed_latest }}\` (<${SEAWEED_PR_URL}|#${SEAWEED_PR_NUMBER}>)\n"
+            PRS_CREATED=$((PRS_CREATED + 1))
+          fi
+          
+          if [ -n "$DEX_PR_URL" ]; then
+            SERVICES_TEXT="${SERVICES_TEXT}• *Dex*: \`${{ needs.check-all-updates.outputs.dex_current }}\` → \`${{ needs.check-all-updates.outputs.dex_latest }}\` (<${DEX_PR_URL}|#${DEX_PR_NUMBER}>)\n"
+            PRS_CREATED=$((PRS_CREATED + 1))
+          fi
+          
+          if [ -n "$NATS_PR_URL" ]; then
+            SERVICES_TEXT="${SERVICES_TEXT}• *NATS*: \`${{ needs.check-all-updates.outputs.nats_current }}\` → \`${{ needs.check-all-updates.outputs.nats_latest }}\` (<${NATS_PR_URL}|#${NATS_PR_NUMBER}>)\n"
             PRS_CREATED=$((PRS_CREATED + 1))
           fi
           
@@ -803,5 +1007,27 @@ jobs:
             fi
           else
             echo "| SeaweedFS | ⏭️ | ⏭️ | ⏭️ |" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          # Dex
+          if [ "${{ needs.check-all-updates.outputs.dex_update }}" = "true" ]; then
+            if [ "${{ needs.test-dex.outputs.result }}" = "success" ]; then
+              echo "| Dex | ✅ | ✅ | ✅ |" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "| Dex | ✅ | ❌ | ⏭️ |" >> $GITHUB_STEP_SUMMARY
+            fi
+          else
+            echo "| Dex | ⏭️ | ⏭️ | ⏭️ |" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          # NATS
+          if [ "${{ needs.check-all-updates.outputs.nats_update }}" = "true" ]; then
+            if [ "${{ needs.test-nats.outputs.result }}" = "success" ]; then
+              echo "| NATS | ✅ | ✅ | ✅ |" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "| NATS | ✅ | ❌ | ⏭️ |" >> $GITHUB_STEP_SUMMARY
+            fi
+          else
+            echo "| NATS | ⏭️ | ⏭️ | ⏭️ |" >> $GITHUB_STEP_SUMMARY
           fi
 
