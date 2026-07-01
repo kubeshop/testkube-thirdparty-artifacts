@@ -1,0 +1,8 @@
+# NATS Service Configuration
+name: nats
+display_name: NATS
+source: dockerhub
+source_image: nats
+version_pattern: "^[0-9]+\\.[0-9]+\\.[0-9]+-alpine$"
+dockerfile: nats-release.dockerfile
+dockerhub_image: docker.io/kubeshop/testkube-nats
