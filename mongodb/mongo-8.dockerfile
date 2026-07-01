@@ -1,5 +1,9 @@
-# Stage 1: Build MongoDB tools with Go 1.25 and updated dependencies
-FROM golang:1.25 AS builder
+# Stage 1: Build MongoDB tools with a patched Go toolchain and updated deps.
+# Go >= 1.25.7 / 1.26 fixes CVE-2025-68121 (crypto/tls). GOTOOLCHAIN=local forces
+# the image's Go instead of the (older) version pinned in go.mod.
+FROM golang:1.26 AS builder
+
+ENV GOTOOLCHAIN=local
 
 ARG TOOLS_VERSION=100.13.0
 
@@ -13,8 +17,8 @@ RUN git clone --depth 1 --branch ${TOOLS_VERSION}  https://github.com/mongodb/mo
 
 WORKDIR /build/mongo-tools
 
-# Update dependencies and regenerate vendor directory
-RUN go get golang.org/x/crypto@v0.35.0 && \
+# Bump vulnerable Go dependencies (x/crypto, x/net) and regenerate vendor dir.
+RUN go get golang.org/x/crypto@v0.47.0 golang.org/x/net@v0.48.0 && \
     go mod tidy && \
     go mod vendor
 
@@ -29,7 +33,9 @@ RUN go build -mod=vendor -o /usr/local/bin/mongostat ./mongostat/main/mongostat.
 RUN go build -mod=vendor -o /usr/local/bin/mongotop ./mongotop/main/mongotop.go
 
 # Stage 2: Template MongoDB configuration file
-FROM golang:1.25 AS template-builder
+FROM golang:1.26 AS template-builder
+
+ENV GOTOOLCHAIN=local
 
 RUN apt-get update && apt-get install -y git
 
@@ -100,21 +106,23 @@ RUN apt-get update && \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
-# TODO: replace with our own wait-for-port if needed
-# Install Bitnami wait-for-port utility.
-RUN curl -fsSL "https://github.com/bitnami/wait-for-port/releases/download/v1.0.10/wait-for-port-linux-${OS_ARCH}.tar.gz" -o /tmp/wait-for-port.tar.gz \
-  && tar -xzf /tmp/wait-for-port.tar.gz -C /tmp \
-  && install -m 0755 "$(find /tmp -maxdepth 1 -type f -name 'wait-for-port*' | head -n1)" /usr/local/bin/wait-for-port \
-  && find /tmp -maxdepth 1 -type f -name 'wait-for-port*' -delete \
-  && rm -f /tmp/wait-for-port.tar.gz
+# Remove unused vulnerable Go helper binaries shipped by the base image:
+# - gosu: not referenced by the Bitnami scripts (entrypoint runs as USER 1001)
+# - wait-for-port: not referenced by the Bitnami scripts
+# Both are outdated Go binaries and were the only remaining CRITICAL findings.
+RUN rm -f /usr/local/bin/gosu /usr/local/bin/wait-for-port
 
 # Copy render template binary
 COPY --from=template-builder /opt/bitnami/common/bin/render-template /opt/bitnami/common/bin/render-template
 
 RUN mkdir -p /opt/bitnami/mongodb
 
-# Copy recompiled binaries with updated dependencies
+# Copy recompiled binaries with updated dependencies (runtime PATH uses these).
 COPY --from=builder /usr/local/bin/mongo* /usr/local/bin/bsondump /opt/bitnami/mongodb/bin/
+
+# Also overwrite the base image's own (vulnerable) database tools in /usr/bin
+# with the patched builds, so no stale copy remains in the image.
+COPY --from=builder /usr/local/bin/mongo* /usr/local/bin/bsondump /usr/bin/
 
 # Copy scripts foldet to the container
 COPY scripts /opt/bitnami/scripts
