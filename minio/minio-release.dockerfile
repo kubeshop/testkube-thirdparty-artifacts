@@ -1,5 +1,7 @@
-# Use a lightweight Debian minimal image
-FROM golang:1.25.3-alpine3.22 AS build
+# Build stage.
+# Go >= 1.25.7 / 1.26.0 fixes CVE-2025-68121 (crypto/tls). GOTOOLCHAIN=local
+# forces the image's Go toolchain instead of the (older) version pinned in go.mod.
+FROM golang:1.26.0-alpine3.22 AS build
 
 # Build arguments
 ARG TARGETOS
@@ -8,6 +10,10 @@ ARG GOMODCACHE="/root/.cache/go-build"
 ARG GOCACHE="/go/pkg"
 ARG MINIO_SERVER_VERSION=RELEASE.2025-10-15T17-29-55Z
 ARG MINIO_CLIENT_VERSION=RELEASE.2025-08-13T08-35-41Z
+# gRPC >= 1.79.3 fixes CVE-2026-33186 (authorization bypass).
+ARG GRPC_VERSION=v1.79.3
+
+ENV GOTOOLCHAIN=local
 
 # Set working directory
 WORKDIR /build
@@ -18,8 +24,9 @@ RUN apk update && apk add --no-cache git make bash perl
 # Git clone Minio server source code
 RUN git clone --depth 1 --branch "${MINIO_SERVER_VERSION}" https://github.com/minio/minio
 
-# Build Minio server binary
+# Build Minio server binary (bump vulnerable gRPC dependency first)
 RUN cd minio && \
+    go get google.golang.org/grpc@${GRPC_VERSION} && go mod tidy && \
     GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
     GOMODCACHE=${GOMODCACHE} GOCACHE=${GOCACHE} \
     make build && cd ..
@@ -27,8 +34,9 @@ RUN cd minio && \
 # Git clone Minio Client source code
 RUN git clone --depth 1 --branch "${MINIO_CLIENT_VERSION}" https://github.com/minio/mc
 
-# Build Minio Client binary
+# Build Minio Client binary (bump vulnerable gRPC dependency first)
 RUN cd mc && \
+    go get google.golang.org/grpc@${GRPC_VERSION} && go mod tidy && \
     GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
     GOMODCACHE=${GOMODCACHE} GOCACHE=${GOCACHE} \
     make build
@@ -49,13 +57,16 @@ LABEL maintainer="Testkube Team" \
       version="2025.10" \
       description="Minio Server - Testkube Edition"
 
-# Install required packages
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# Install required packages and apply available OS security patches
+# (fixes CVE-2026-31789 openssl, CVE-2026-33845/42010 gnutls, perl-base, ...).
+RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends \
     ca-certificates \
     jq \
     curl \
     procps \
     bash \
+  && apt-get autoremove -y \
+  && apt-get clean \
   && rm -rf /var/lib/apt/lists/*
 
 # Use bash shell with strict error handling
