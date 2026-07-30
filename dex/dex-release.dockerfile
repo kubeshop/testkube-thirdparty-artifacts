@@ -25,7 +25,7 @@ FROM ${GO_IMAGE} AS builder
 ARG DEX_VERSION
 ARG GRPC_VERSION
 
-RUN apk add --no-cache git make bash
+RUN apk add --no-cache git make bash gcc musl-dev
 
 WORKDIR /usr/local/src
 RUN git clone --depth 1 --branch "${DEX_VERSION}" https://github.com/dexidp/dex.git
@@ -38,7 +38,7 @@ RUN go get google.golang.org/grpc@${GRPC_VERSION} && go mod tidy
 
 # Build static binaries. -buildvcs=false avoids stamping a "+dirty" pseudo
 # version (which otherwise breaks module version detection during CVE scans).
-RUN CGO_ENABLED=0 go build -buildvcs=false -o /go/bin/dex \
+RUN CGO_ENABLED=1 go build -buildvcs=false -o /go/bin/dex \
       -ldflags "-w -X main.version=${DEX_VERSION} -extldflags \"-static\"" \
       ./cmd/dex \
  && CGO_ENABLED=0 go build -buildvcs=false -o /go/bin/docker-entrypoint \
