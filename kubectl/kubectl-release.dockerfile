@@ -2,7 +2,7 @@
 # Based on official alpine/kubectl image
 # KUBECTL_VERSION is updated by scripts/check-version.sh
 
-FROM alpine/kubectl:1.36.4
+FROM alpine/kubectl:1.37.0
 
 LABEL maintainer="Testkube Team" \
       description="kubectl - Testkube Edition"
