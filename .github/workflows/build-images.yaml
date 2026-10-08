@@ -162,6 +162,8 @@ jobs:
             ${{ steps.seaweed.outputs.bake-file }}
             ${{ steps.dex.outputs.bake-file }}
             ${{ steps.nats.outputs.bake-file }}
+          provenance: mode=min
+          sbom: true
           push: true
 
       - name: Push image to GAR
@@ -169,6 +171,17 @@ jobs:
           SERVICE: ${{ steps.target.outputs.target }}
           VERSION: ${{ steps.version.outputs.tag }}
         run: ./scripts/push-to-gar.sh "$SERVICE" "$VERSION"
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        with:
+          cosign-release: v3.1.3
+
+      - name: Sign image
+        env:
+          SERVICE: ${{ steps.target.outputs.target }}
+          VERSION: ${{ steps.version.outputs.tag }}
+        run: ./scripts/sign-image.sh "$SERVICE" "$VERSION"
       
       - name: Summary
         run: |

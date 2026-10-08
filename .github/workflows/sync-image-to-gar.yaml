@@ -1,8 +1,9 @@
 name: Sync Image to GAR
 
 # Copies an image that is already published on Docker Hub to GAR without
-# rebuilding it (same digest). Used to backfill versions released before
-# build-images.yaml pushed to GAR. Existing GAR tags are never overwritten.
+# rebuilding it (same digest), then signs it in both registries. Used to
+# backfill versions released before build-images.yaml pushed to GAR and signed.
+# Existing GAR tags are never overwritten.
 on:
   workflow_dispatch:
     inputs:
@@ -30,6 +31,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@v4
 
@@ -51,3 +53,14 @@ jobs:
           SERVICE: ${{ inputs.service }}
           VERSION: ${{ inputs.version }}
         run: ./scripts/push-to-gar.sh "$SERVICE" "$VERSION"
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        with:
+          cosign-release: v3.1.3
+
+      - name: Sign image
+        env:
+          SERVICE: ${{ inputs.service }}
+          VERSION: ${{ inputs.version }}
+        run: ./scripts/sign-image.sh "$SERVICE" "$VERSION"
