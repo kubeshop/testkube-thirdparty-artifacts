@@ -1,0 +1,53 @@
+name: Sync Image to GAR
+
+# Copies an image that is already published on Docker Hub to GAR without
+# rebuilding it (same digest). Used to backfill versions released before
+# build-images.yaml pushed to GAR. Existing GAR tags are never overwritten.
+on:
+  workflow_dispatch:
+    inputs:
+      service:
+        description: 'Service to sync'
+        required: true
+        type: choice
+        options:
+          - minio
+          - mongodb
+          - postgresql
+          - kubectl
+          - seaweed
+          - dex
+          - nats
+      version:
+        description: 'Image tag published on Docker Hub (e.g. 8.3.11)'
+        required: true
+        type: string
+
+concurrency: ${{ github.workflow }}-${{ inputs.service }}-${{ inputs.version }}
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: DockerHub login (kubeshop)
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: GAR login
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ secrets.GAR_LOCATION }}-docker.pkg.dev
+          username: _json_key
+          password: ${{ secrets.GKE_SA_KEY_PROD }}
+
+      - name: Push image to GAR
+        env:
+          SERVICE: ${{ inputs.service }}
+          VERSION: ${{ inputs.version }}
+        run: ./scripts/push-to-gar.sh "$SERVICE" "$VERSION"

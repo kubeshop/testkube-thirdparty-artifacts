@@ -28,6 +28,13 @@ jobs:
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: GAR login
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ secrets.GAR_LOCATION }}-docker.pkg.dev
+          username: _json_key
+          password: ${{ secrets.GKE_SA_KEY_PROD }}
       
       - name: Determine target service
         id: target
@@ -156,11 +163,18 @@ jobs:
             ${{ steps.dex.outputs.bake-file }}
             ${{ steps.nats.outputs.bake-file }}
           push: true
+
+      - name: Push image to GAR
+        env:
+          SERVICE: ${{ steps.target.outputs.target }}
+          VERSION: ${{ steps.version.outputs.tag }}
+        run: ./scripts/push-to-gar.sh "$SERVICE" "$VERSION"
       
       - name: Summary
         run: |
           SERVICE="${{ steps.target.outputs.target }}"
           VERSION="${{ steps.version.outputs.tag }}"
+          GAR_IMAGE=$(grep "^gar_image:" "${SERVICE}/service.yaml" | sed 's/gar_image: //')
           
           echo "### 🐳 Image Built and Pushed" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
@@ -169,3 +183,4 @@ jobs:
           echo "| Service | **${SERVICE}** |" >> $GITHUB_STEP_SUMMARY
           echo "| Version | \`${VERSION}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| Tag | \`${{ github.ref_name }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| GAR | \`${GAR_IMAGE}:${VERSION}\` |" >> $GITHUB_STEP_SUMMARY
