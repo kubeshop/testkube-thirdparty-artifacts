@@ -22,10 +22,9 @@ jobs:
       
       - name: Extract service and version from PR
         id: extract
+        env:
+          LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
         run: |
-          TITLE="${{ github.event.pull_request.title }}"
-          LABELS='${{ toJSON(github.event.pull_request.labels.*.name) }}'
-          
           # Detect service from labels
           if echo "$LABELS" | grep -q '"minio"'; then
             SERVICE="minio"
