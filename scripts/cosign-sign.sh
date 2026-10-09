@@ -4,7 +4,9 @@
 # Signatures use the classic format (tag sha256-<digest>.sig) instead of the
 # cosign v3 default, which stores them as untagged OCI referrers: GAR's
 # delete-untagged cleanup policy would remove those. `cosign verify` finds
-# either format with default flags.
+# either format with default flags. The classic format can't be combined with
+# the Sigstore TUF signing config, so the public-good Fulcio/Rekor defaults are
+# used instead.
 #
 # Skips digests that already carry a signature, so re-runs don't stack
 # duplicate signatures.
@@ -39,5 +41,5 @@ if ! echo "$output" | grep -q "${SIGNATURE_REF}: not found"; then
   exit 1
 fi
 
-cosign sign --yes --new-bundle-format=false "${REPOSITORY}@${DIGEST}"
+cosign sign --yes --new-bundle-format=false --use-signing-config=false "${REPOSITORY}@${DIGEST}"
 echo "Signed ${REPOSITORY}@${DIGEST}"
