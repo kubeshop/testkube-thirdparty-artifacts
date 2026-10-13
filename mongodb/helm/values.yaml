@@ -143,8 +143,8 @@ diagnosticMode:
 ## @param image.debug Set to true if you would like to see extra information on logs
 ##
 image:
-  registry: us-east1-docker.pkg.dev
-  repository: testkube-cloud-372110/testkube/mongodb
+  registry: docker.io
+  repository: kubeshop/bitnami-mongodb
   tag: 8.0.15
   digest: ""
   ## Specify a imagePullPolicy
@@ -857,9 +857,9 @@ externalAccess:
     ## @param externalAccess.autoDiscovery.image.pullSecrets Init container auto-discovery image pull secrets
     ##
     image:
-      registry: us-east1-docker.pkg.dev
-      repository: testkube-cloud-372110/testkube/kubectl
-      tag: 1.35.0
+      registry: docker.io
+      repository: kubeshop/testkube-kubectl
+      tag: 1.35.1
       digest: ""
       ## Specify a imagePullPolicy
       ## ref: https://kubernetes.io/docs/concepts/containers/images/#pre-pulled-images
