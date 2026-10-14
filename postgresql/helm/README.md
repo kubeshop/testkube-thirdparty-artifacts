@@ -1,8 +1,8 @@
 # PostgreSQL 18.0.0 - Testkube
 
 ## Overview
-Image uses `18.0.0` Application version and resides in `us-east1-docker.pkg.dev` repo. Full image path: `us-east1-docker.pkg.dev/testkube-cloud-372110/testkube/postgresql:18-debian-12`.
-This is an official PostgreSQL image which was rebuilt and pushed to `testkube` Google Artifact Registry. Link to the original Dockerfile: https://github.com/bitnami/containers/blob/main/bitnami/postgresql/18/debian-12/Dockerfile
+Image uses `18.0.0` Application version and resides in Docker Hub. Full image path: `docker.io/kubeshop/testkube-postgres:18-debian-12`, also mirrored to `us-east1-docker.pkg.dev/testkube-cloud-372110/testkube/postgresql`.
+This is an official PostgreSQL image which was rebuilt and pushed to Docker Hub and the `testkube` Google Artifact Registry. Link to the original Dockerfile: https://github.com/bitnami/containers/blob/main/bitnami/postgresql/18/debian-12/Dockerfile
 
 ## Key Features
 - **PostgreSQL Version**: 18.0.0
@@ -16,8 +16,8 @@ This is an official PostgreSQL image which was rebuilt and pushed to `testkube` 
 ```yaml
 postgresql:
   image:
-    registry: us-east1-docker.pkg.dev
-    repository: testkube-cloud-372110/testkube/postgresql
+    registry: docker.io
+    repository: kubeshop/testkube-postgres
     tag: 18-debian-12
 ```
 

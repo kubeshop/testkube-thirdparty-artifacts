@@ -25,4 +25,4 @@ name: mongodb
 sources:
 - https://github.com/kubeshop/testkube-thirdparty-artifacts/tree/main/mongodb
 - https://mongodb.org
-version: 9.0.2-0
+version: 9.0.2-1
