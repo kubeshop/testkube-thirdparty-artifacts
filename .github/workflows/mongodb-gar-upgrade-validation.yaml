@@ -89,7 +89,7 @@ jobs:
       - name: Authenticate to dev GKE
         uses: google-github-actions/auth@v2
         with:
-          credentials_json: ${{ secrets.GKE_SA_KEY }}
+          credentials_json: ${{ secrets.GKE_GH_SA_KEY }}
 
       - name: Configure dev GKE access
         uses: google-github-actions/get-gke-credentials@v2
