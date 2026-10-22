@@ -1,0 +1,161 @@
+name: MongoDB GAR Upgrade Validation
+
+on:
+  pull_request:
+    paths:
+      - mongodb/**
+      - test/mongodb-upgrade-validation.yaml
+      - .github/workflows/mongodb-gar-upgrade-validation.yaml
+  workflow_dispatch:
+    inputs:
+      baseline_ref:
+        description: Base branch or commit whose MongoDB version is the baseline
+        required: true
+        default: main
+        type: string
+      pr_number:
+        description: PR number used in the temporary GAR image tag
+        required: false
+        type: string
+
+concurrency:
+  group: mongodb-gar-upgrade-${{ github.event.pull_request.number || inputs.pr_number || github.run_id }}
+  cancel-in-progress: true
+
+env:
+  GAR_IMAGE: ${{ secrets.GAR_LOCATION }}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID_PROD }}/testkube/mongodb
+  DEV_GKE_CLUSTER_NAME: ${{ vars.DEV_GKE_CLUSTER_NAME }}
+  DEV_GKE_LOCATION: ${{ vars.DEV_GKE_LOCATION }}
+  GKE_PROJECT: ${{ vars.GKE_PROJECT }}
+  TESTKUBE_RUNNER_NAMESPACE: ${{ vars.TESTKUBE_RUNNER_NAMESPACE }}
+  TESTKUBE_RUNNER_SERVICE: ${{ vars.TESTKUBE_RUNNER_SERVICE }}
+  TESTKUBE_CHART_VERSION: ${{ vars.TESTKUBE_CHART_VERSION }}
+
+jobs:
+  build-candidate:
+    # Fork PRs cannot use the GAR or dev-GKE secrets.
+    if: github.event.pull_request.head.repo.full_name == github.repository || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      id-token: write
+    environment: dev
+    outputs:
+      baseline: ${{ steps.versions.outputs.baseline }}
+      candidate: ${{ steps.versions.outputs.candidate }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve baseline and candidate tags
+        id: versions
+        run: |
+          BASE_REF="${{ github.event.pull_request.base.sha || inputs.baseline_ref || github.sha }}"
+          BASELINE_TAG="$(git show "$BASE_REF:mongodb/helm/Chart.yaml" | awk -F'"' '/^appVersion:/ { print $2; exit }')"
+          test -n "$BASELINE_TAG"
+          CANDIDATE_TAG="pr-${{ github.event.pull_request.number || inputs.pr_number || github.run_id }}-${GITHUB_SHA::12}"
+          echo "baseline=$BASELINE_TAG" >> "$GITHUB_OUTPUT"
+          echo "candidate=$CANDIDATE_TAG" >> "$GITHUB_OUTPUT"
+
+      - name: GAR login
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ secrets.GAR_LOCATION }}-docker.pkg.dev
+          username: _json_key
+          password: ${{ secrets.GKE_SA_KEY_PROD }}
+
+      - name: Build and publish immutable candidate image to GAR
+        uses: docker/build-push-action@v6
+        with:
+          context: mongodb
+          file: mongodb/mongo-8.dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ${{ env.GAR_IMAGE }}:${{ steps.versions.outputs.candidate }}
+
+  validate:
+    needs: build-candidate
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      id-token: write
+    environment: dev
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Authenticate to dev GKE
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GKE_SA_KEY }}
+
+      - name: Configure dev GKE access
+        uses: google-github-actions/get-gke-credentials@v2
+        with:
+          cluster_name: ${{ env.DEV_GKE_CLUSTER_NAME }}
+          location: ${{ env.DEV_GKE_LOCATION }}
+          project_id: ${{ env.GKE_PROJECT }}
+
+      - name: Install Testkube CLI
+        run: |
+          VERSION="$(curl -fsSL https://api.github.com/repos/kubeshop/testkube/releases/latest | jq -r .tag_name)"
+          curl -fsSL "https://github.com/kubeshop/testkube/releases/download/${VERSION}/testkube_${VERSION#v}_Linux_x86_64.tar.gz" | tar -xz
+          sudo install kubectl-testkube /usr/local/bin/testkube
+          testkube disable telemetry
+
+      - name: Provision isolated OSS installation
+        env:
+          BASELINE_TAG: ${{ needs.build-candidate.outputs.baseline }}
+        run: |
+          TARGET_NAMESPACE="mongodb-upgrade-pr-${{ github.event.pull_request.number || github.run_id }}-${GITHUB_RUN_ATTEMPT}"
+          echo "TARGET_NAMESPACE=$TARGET_NAMESPACE" >> "$GITHUB_ENV"
+          kubectl create namespace "$TARGET_NAMESPACE"
+          helm dependency build mongodb/helm
+          helm upgrade --install testkube-mongodb mongodb/helm \
+            --namespace "$TARGET_NAMESPACE" \
+            --set image.registry='${{ secrets.GAR_LOCATION }}-docker.pkg.dev' \
+            --set image.repository='${{ vars.GCP_PROJECT_ID_PROD }}/testkube/mongodb' \
+            --set image.tag="$BASELINE_TAG" \
+            --set image.pullPolicy=IfNotPresent \
+            --set auth.enabled=false \
+            --wait --timeout=15m
+          helm repo add testkube https://kubeshop.github.io/helm-charts
+          helm repo update testkube
+          helm upgrade --install testkube testkube/testkube \
+            --namespace "$TARGET_NAMESPACE" \
+            --version "$TESTKUBE_CHART_VERSION" \
+            --set mongodb.enabled=false \
+            --set testkube-api.mongodb.enabled=true \
+            --set-string testkube-api.mongodb.dsn='mongodb://testkube-mongodb:27017' \
+            --set testkube-operator.installCRD=false \
+            --wait --timeout=15m
+          kubectl rollout status deployment/testkube-api-server -n "$TARGET_NAMESPACE" --timeout=15m
+
+      - name: Submit and run upgrade validation TestWorkflow
+        env:
+          BASELINE_TAG: ${{ needs.build-candidate.outputs.baseline }}
+          CANDIDATE_TAG: ${{ needs.build-candidate.outputs.candidate }}
+        run: |
+          kubectl apply -n "$TESTKUBE_RUNNER_NAMESPACE" -f test/mongodb-upgrade-validation.yaml
+          kubectl -n "$TESTKUBE_RUNNER_NAMESPACE" port-forward "svc/$TESTKUBE_RUNNER_SERVICE" 8088:8088 >/tmp/testkube-port-forward.log 2>&1 &
+          port_forward_pid=$!
+          trap 'kill "$port_forward_pid"' EXIT
+          sleep 5
+          testkube config api-uri http://127.0.0.1:8088
+          testkube run tw mongodb-upgrade-validation --watch \
+            --config "namespace=$TARGET_NAMESPACE" \
+            --config "apiURL=http://testkube-api-server.$TARGET_NAMESPACE.svc.cluster.local:8088" \
+            --config "mongodbRelease=testkube-mongodb" \
+            --config "mongodbWorkloadKind=deployment" \
+            --config "mongodbWorkloadName=testkube-mongodb" \
+            --config "gitRevision=${{ github.event.pull_request.head.sha || github.sha }}" \
+            --config "imageRegistry=${{ secrets.GAR_LOCATION }}-docker.pkg.dev" \
+            --config "imageRepository=${{ vars.GCP_PROJECT_ID_PROD }}/testkube/mongodb" \
+            --config "baselineTag=$BASELINE_TAG" \
+            --config "candidateTag=$CANDIDATE_TAG"
+
+      - name: Remove isolated OSS installation
+        if: always()
+        run: kubectl delete namespace "$TARGET_NAMESPACE" --ignore-not-found --wait=false
