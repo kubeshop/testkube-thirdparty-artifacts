@@ -64,12 +64,11 @@ these repository/environment variables before enabling it:
 
 | Variable | Purpose |
 | --- | --- |
-| `GCP_PROJECT_ID_PROD` | GAR project containing the MongoDB repository. |
 | `DEV_GKE_CLUSTER_NAME`, `DEV_GKE_LOCATION`, `GKE_PROJECT` | The dev GKE cluster connection. |
 | `TESTKUBE_RUNNER_NAMESPACE`, `TESTKUBE_RUNNER_SERVICE` | The existing dev Testkube installation that runs the validation TestWorkflow. |
 | `TESTKUBE_CHART_VERSION` | The OSS Testkube Helm chart version to install for every isolated validation run. |
 
-The job requires `GAR_LOCATION`, `GKE_SA_KEY_PROD`, and
+The job requires `GAR_LOCATION`, `GCP_PROJECT_ID_PROD`, `GKE_SA_KEY_PROD`, and
 `GKE_SA_KEY` secrets. The GKE identity must create namespaces
 and install Helm releases; the workflow's service account must upgrade MongoDB
 in the isolated namespace.

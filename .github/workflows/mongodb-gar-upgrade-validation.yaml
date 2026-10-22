@@ -23,7 +23,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  GAR_IMAGE: ${{ secrets.GAR_LOCATION }}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID_PROD }}/testkube/mongodb
+  GAR_IMAGE: ${{ secrets.GAR_LOCATION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID_PROD }}/testkube/mongodb
   DEV_GKE_CLUSTER_NAME: ${{ vars.DEV_GKE_CLUSTER_NAME }}
   DEV_GKE_LOCATION: ${{ vars.DEV_GKE_LOCATION }}
   GKE_PROJECT: ${{ vars.GKE_PROJECT }}
@@ -116,7 +116,7 @@ jobs:
           helm upgrade --install testkube-mongodb mongodb/helm \
             --namespace "$TARGET_NAMESPACE" \
             --set image.registry='${{ secrets.GAR_LOCATION }}-docker.pkg.dev' \
-            --set image.repository='${{ vars.GCP_PROJECT_ID_PROD }}/testkube/mongodb' \
+            --set image.repository='${{ secrets.GCP_PROJECT_ID_PROD }}/testkube/mongodb' \
             --set image.tag="$BASELINE_TAG" \
             --set image.pullPolicy=IfNotPresent \
             --set auth.enabled=false \
@@ -152,7 +152,7 @@ jobs:
             --config "mongodbWorkloadName=testkube-mongodb" \
             --config "gitRevision=${{ github.event.pull_request.head.sha || github.sha }}" \
             --config "imageRegistry=${{ secrets.GAR_LOCATION }}-docker.pkg.dev" \
-            --config "imageRepository=${{ vars.GCP_PROJECT_ID_PROD }}/testkube/mongodb" \
+            --config "imageRepository=${{ secrets.GCP_PROJECT_ID_PROD }}/testkube/mongodb" \
             --config "baselineTag=$BASELINE_TAG" \
             --config "candidateTag=$CANDIDATE_TAG"
 
