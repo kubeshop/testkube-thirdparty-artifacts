@@ -83,6 +83,9 @@ cluster already has them. The TestWorkflow is applied and executed by that same
 Testkube installation. It deletes the namespace after the validation regardless
 of the result.
 
+The OSS installation sets MinIO's pod `fsGroup` to `1001`, making a newly
+provisioned `standard-rwo` volume writable by the image's existing UID `1001`.
+
 The Testkube Helm release name is unique per run. This prevents the chart's
 required cluster-scoped `crd-reader-<release>` RBAC object from colliding with
 an existing Testkube or Enterprise installation. No CRDs are installed by this

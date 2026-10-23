@@ -131,6 +131,7 @@ jobs:
             --no-mongo \
             --helm-set testkube-api.mongodb.enabled=true \
             --helm-set testkube-api.mongodb.dsn='mongodb://testkube-mongodb:27017' \
+            --helm-set testkube-api.minio.podSecurityContext.fsGroup=1001 \
             --helm-set testkube-operator.installCRD=false \
             --helm-arg wait= \
             --helm-arg timeout=15m
