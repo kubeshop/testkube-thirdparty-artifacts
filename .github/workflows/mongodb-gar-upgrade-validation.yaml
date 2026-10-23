@@ -124,15 +124,16 @@ jobs:
             --set image.pullPolicy=IfNotPresent \
             --set auth.enabled=false \
             --wait --timeout=15m
-          helm repo add testkube https://kubeshop.github.io/helm-charts
-          helm repo update testkube
-          helm upgrade --install "$TESTKUBE_RELEASE" testkube/testkube \
+          testkube init standalone-agent \
+            --name "$TESTKUBE_RELEASE" \
             --namespace "$TARGET_NAMESPACE" \
-            --set mongodb.enabled=false \
-            --set testkube-api.mongodb.enabled=true \
-            --set-string testkube-api.mongodb.dsn='mongodb://testkube-mongodb:27017' \
-            --set testkube-operator.installCRD=false \
-            --wait --timeout=15m
+            --no-confirm \
+            --no-mongo \
+            --no-crds \
+            --helm-set testkube-api.mongodb.enabled=true \
+            --helm-set testkube-api.mongodb.dsn='mongodb://testkube-mongodb:27017' \
+            --helm-arg wait= \
+            --helm-arg timeout=15m
           kubectl rollout status deployment/testkube-api-server -n "$TARGET_NAMESPACE" --timeout=15m
 
       - name: Submit and run upgrade validation TestWorkflow

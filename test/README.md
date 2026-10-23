@@ -75,10 +75,12 @@ create namespaces and install Helm releases; the TestWorkflow service account
 must upgrade MongoDB in its own isolated namespace.
 
 For OSS, the job creates one namespace per run, installs `testkube-mongodb` at
-the baseline GAR tag, and installs the Testkube chart with its bundled MongoDB
-disabled and `testkube-api.mongodb.dsn` set to the external service. The
-TestWorkflow is applied and executed by that same Testkube installation. It
-deletes the namespace after the validation regardless of the result.
+the baseline GAR tag, and installs Testkube through the same `testkube init
+standalone-agent` path used for an OSS installation. It disables only bundled
+MongoDB, sets `testkube-api.mongodb.dsn` to the external service, and skips
+CRD installation because the cluster already has them. The TestWorkflow is
+applied and executed by that same Testkube installation. It deletes the
+namespace after the validation regardless of the result.
 
 The Testkube Helm release name is unique per run. This prevents the chart's
 required cluster-scoped `crd-reader-<release>` RBAC object from colliding with
