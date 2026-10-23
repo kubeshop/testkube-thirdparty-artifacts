@@ -26,10 +26,10 @@ env:
   GAR_IMAGE: ${{ secrets.GAR_LOCATION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID_PROD }}/testkube/mongodb
   DEV_GKE_CLUSTER_NAME: ${{ secrets.DEV_GKE_CLUSTER_NAME }}
   DEV_GKE_LOCATION: ${{ secrets.DEV_GKE_LOCATION }}
-  GKE_PROJECT: ${{ secrets.GKE_PROJECT }}
-  TESTKUBE_RUNNER_NAMESPACE: ${{ secrets.TESTKUBE_RUNNER_NAMESPACE }}
-  TESTKUBE_RUNNER_SERVICE: ${{ secrets.TESTKUBE_RUNNER_SERVICE }}
-  TESTKUBE_CHART_VERSION: ${{ secrets.TESTKUBE_CHART_VERSION }}
+  DEV_GKE_PROJECT: ${{ secrets.DEV_GKE_PROJECT }}
+  TESTKUBE_RUNNER_NAMESPACE: testkube
+  TESTKUBE_RUNNER_SERVICE: testkube-api-server
+  TESTKUBE_CHART_VERSION: "2.4.3"
 
 jobs:
   build-candidate:
@@ -92,12 +92,15 @@ jobs:
           workload_identity_provider: ${{ secrets.GKE_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ secrets.GKE_SERVICE_ACCOUNT_EMAIL }}
 
+      - name: Show federated identity
+        run: gcloud auth list
+
       - name: Configure dev GKE access
         uses: google-github-actions/get-gke-credentials@v2
         with:
           cluster_name: ${{ secrets.DEV_GKE_CLUSTER_NAME }}
           location: ${{ secrets.DEV_GKE_LOCATION }}
-          project_id: ${{ secrets.GKE_PROJECT }}
+          project_id: ${{ secrets.DEV_GKE_PROJECT }}
 
       - name: Install Testkube CLI
         run: |

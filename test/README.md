@@ -65,16 +65,15 @@ these repository/environment secrets before enabling it:
 | Secret | Purpose |
 | --- | --- |
 | `DEV_GKE_CLUSTER_NAME`, `DEV_GKE_LOCATION`, `GKE_PROJECT` | The dev GKE cluster connection. |
-| `TESTKUBE_RUNNER_NAMESPACE`, `TESTKUBE_RUNNER_SERVICE` | The existing dev Testkube installation that runs the validation TestWorkflow. |
-| `TESTKUBE_CHART_VERSION` | The OSS Testkube Helm chart version to install for every isolated validation run. |
 
 The job requires `GAR_LOCATION`, `GCP_PROJECT_ID_PROD`, `GKE_SA_KEY_PROD`,
 `GKE_WORKLOAD_IDENTITY_PROVIDER`, `GKE_SERVICE_ACCOUNT_EMAIL`,
-`DEV_GKE_CLUSTER_NAME`, `DEV_GKE_LOCATION`, `GKE_PROJECT`,
-`TESTKUBE_RUNNER_NAMESPACE`, `TESTKUBE_RUNNER_SERVICE`, and
-`TESTKUBE_CHART_VERSION` secrets. The workload-identity service account must
-create namespaces and install Helm releases; the workflow's service account
-must upgrade MongoDB in the isolated namespace.
+`DEV_GKE_CLUSTER_NAME`, `DEV_GKE_LOCATION`, and `GKE_PROJECT` secrets. The
+workflow uses the existing `testkube` namespace and `testkube-api-server`
+service as its runner, and installs OSS Testkube chart version `2.4.3` in each
+isolated namespace. The workload-identity service account must create
+namespaces and install Helm releases; the workflow's service account must
+upgrade MongoDB in the isolated namespace.
 
 For OSS, the job creates a namespace per run, installs `testkube-mongodb` at
 the baseline GAR tag, and installs the Testkube chart with its bundled MongoDB
