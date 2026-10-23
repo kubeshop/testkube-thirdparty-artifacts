@@ -65,13 +65,15 @@ these repository/environment variables before enabling it:
 | Variable | Purpose |
 | --- | --- |
 | `DEV_GKE_CLUSTER_NAME`, `DEV_GKE_LOCATION`, `GKE_PROJECT` | The dev GKE cluster connection. |
+| `GKE_WORKLOAD_IDENTITY_PROVIDER` | Full Google workload identity provider resource name used by GitHub OIDC. |
+| `GKE_SERVICE_ACCOUNT_EMAIL` | GCP service-account email impersonated through workload identity federation. |
 | `TESTKUBE_RUNNER_NAMESPACE`, `TESTKUBE_RUNNER_SERVICE` | The existing dev Testkube installation that runs the validation TestWorkflow. |
 | `TESTKUBE_CHART_VERSION` | The OSS Testkube Helm chart version to install for every isolated validation run. |
 
-The job requires `GAR_LOCATION`, `GCP_PROJECT_ID_PROD`, `GKE_SA_KEY_PROD`, and
-`GKE_SA_KEY` secrets. The GKE identity must create namespaces
-and install Helm releases; the workflow's service account must upgrade MongoDB
-in the isolated namespace.
+The job requires `GAR_LOCATION`, `GCP_PROJECT_ID_PROD`, and `GKE_SA_KEY_PROD`
+secrets. The workload-identity service account must create namespaces and
+install Helm releases; the workflow's service account must upgrade MongoDB in
+the isolated namespace.
 
 For OSS, the job creates a namespace per run, installs `testkube-mongodb` at
 the baseline GAR tag, and installs the Testkube chart with its bundled MongoDB
