@@ -80,6 +80,11 @@ disabled and `testkube-api.mongodb.dsn` set to the external service. The
 TestWorkflow is applied and executed by that same Testkube installation. It
 deletes the namespace after the validation regardless of the result.
 
+The Testkube Helm release name is unique per run. This prevents the chart's
+required cluster-scoped `crd-reader-<release>` RBAC object from colliding with
+an existing Testkube or Enterprise installation. No CRDs are installed by this
+validation job.
+
 To test an open PR manually, open **Actions → MongoDB GAR Upgrade
 Validation → Run workflow**, choose the PR branch, set `baseline_ref` to the
 branch it targets (normally `main`), and provide its `pr_number`. This builds

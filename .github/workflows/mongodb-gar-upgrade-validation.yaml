@@ -111,7 +111,9 @@ jobs:
           BASELINE_TAG: ${{ needs.build-candidate.outputs.baseline }}
         run: |
           TARGET_NAMESPACE="mongodb-upgrade-pr-${{ github.event.pull_request.number || github.run_id }}-${GITHUB_RUN_ATTEMPT}"
+          TESTKUBE_RELEASE="mongodb-validation-${{ github.event.pull_request.number || github.run_id }}-${GITHUB_RUN_ATTEMPT}"
           echo "TARGET_NAMESPACE=$TARGET_NAMESPACE" >> "$GITHUB_ENV"
+          echo "TESTKUBE_RELEASE=$TESTKUBE_RELEASE" >> "$GITHUB_ENV"
           kubectl create namespace "$TARGET_NAMESPACE"
           helm dependency build mongodb/helm
           helm upgrade --install testkube-mongodb mongodb/helm \
@@ -124,7 +126,7 @@ jobs:
             --wait --timeout=15m
           helm repo add testkube https://kubeshop.github.io/helm-charts
           helm repo update testkube
-          helm upgrade --install testkube testkube/testkube \
+          helm upgrade --install "$TESTKUBE_RELEASE" testkube/testkube \
             --namespace "$TARGET_NAMESPACE" \
             --set mongodb.enabled=false \
             --set testkube-api.mongodb.enabled=true \
