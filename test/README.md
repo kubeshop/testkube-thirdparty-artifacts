@@ -60,19 +60,21 @@ This ordering is essential: a candidate that exists only on Docker Hub does not
 validate the GAR artifact that production pulls.
 
 `mongodb-gar-upgrade-validation.yaml` runs this PR gate on dev GKE. Configure
-these repository/environment variables before enabling it:
+these repository/environment secrets before enabling it:
 
-| Variable | Purpose |
+| Secret | Purpose |
 | --- | --- |
 | `DEV_GKE_CLUSTER_NAME`, `DEV_GKE_LOCATION`, `GKE_PROJECT` | The dev GKE cluster connection. |
 | `TESTKUBE_RUNNER_NAMESPACE`, `TESTKUBE_RUNNER_SERVICE` | The existing dev Testkube installation that runs the validation TestWorkflow. |
 | `TESTKUBE_CHART_VERSION` | The OSS Testkube Helm chart version to install for every isolated validation run. |
 
 The job requires `GAR_LOCATION`, `GCP_PROJECT_ID_PROD`, `GKE_SA_KEY_PROD`,
-`GKE_WORKLOAD_IDENTITY_PROVIDER`, and `GKE_SERVICE_ACCOUNT_EMAIL` secrets.
-The workload-identity service account must create namespaces and install Helm
-releases; the workflow's service account must upgrade MongoDB in the isolated
-namespace.
+`GKE_WORKLOAD_IDENTITY_PROVIDER`, `GKE_SERVICE_ACCOUNT_EMAIL`,
+`DEV_GKE_CLUSTER_NAME`, `DEV_GKE_LOCATION`, `GKE_PROJECT`,
+`TESTKUBE_RUNNER_NAMESPACE`, `TESTKUBE_RUNNER_SERVICE`, and
+`TESTKUBE_CHART_VERSION` secrets. The workload-identity service account must
+create namespaces and install Helm releases; the workflow's service account
+must upgrade MongoDB in the isolated namespace.
 
 For OSS, the job creates a namespace per run, installs `testkube-mongodb` at
 the baseline GAR tag, and installs the Testkube chart with its bundled MongoDB
