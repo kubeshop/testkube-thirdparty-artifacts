@@ -89,8 +89,8 @@ jobs:
       - name: Authenticate to dev GKE
         uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093
         with:
-          workload_identity_provider: ${{ vars.GKE_WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: ${{ vars.GKE_SERVICE_ACCOUNT_EMAIL }}
+          workload_identity_provider: ${{ secrets.GKE_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GKE_SERVICE_ACCOUNT_EMAIL }}
 
       - name: Configure dev GKE access
         uses: google-github-actions/get-gke-credentials@v2
