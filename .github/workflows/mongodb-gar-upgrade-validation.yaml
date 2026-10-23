@@ -149,8 +149,7 @@ jobs:
           port_forward_pid=$!
           trap 'kill "$port_forward_pid"' EXIT
           sleep 5
-          testkube config api-uri http://127.0.0.1:8088
-          testkube run tw mongodb-upgrade-validation --watch \
+          testkube --client direct --api-uri http://127.0.0.1:8088 run tw mongodb-upgrade-validation --watch \
             --config "namespace=$TARGET_NAMESPACE" \
             --config "apiURL=http://testkube-api-server.$TARGET_NAMESPACE.svc.cluster.local:8088" \
             --config "mongodbRelease=testkube-mongodb" \

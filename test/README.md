@@ -83,6 +83,11 @@ cluster already has them. The TestWorkflow is applied and executed by that same
 Testkube installation. It deletes the namespace after the validation regardless
 of the result.
 
+The GitHub runner reaches the API through a temporary `kubectl port-forward`.
+The Testkube CLI uses its `direct` client explicitly for that endpoint; the
+default `proxy` client instead tries to discover `testkube-api-server` through
+the runner's Kubernetes context.
+
 The OSS installation sets MinIO's pod `fsGroup` to `1001`, making a newly
 provisioned `standard-rwo` volume writable by the image's existing UID `1001`.
 
