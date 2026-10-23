@@ -95,9 +95,9 @@ jobs:
       - name: Configure dev GKE access
         uses: google-github-actions/get-gke-credentials@v2
         with:
-          cluster_name: ${{ env.DEV_GKE_CLUSTER_NAME }}
-          location: ${{ env.DEV_GKE_LOCATION }}
-          project_id: ${{ env.GKE_PROJECT }}
+          cluster_name: ${{ secrets.DEV_GKE_CLUSTER_NAME }}
+          location: ${{ secrets.DEV_GKE_LOCATION }}
+          project_id: ${{ secrets.GKE_PROJECT }}
 
       - name: Install Testkube CLI
         run: |
