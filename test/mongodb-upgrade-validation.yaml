@@ -1,0 +1,177 @@
+apiVersion: testworkflows.testkube.io/v1
+kind: TestWorkflow
+metadata:
+  name: mongodb-upgrade-validation
+  labels:
+    core-tests: thirdparty-upgrade
+    service: mongodb
+    tool: testkube
+    validation-scope: oss-enterprise
+description: >-
+  Validates Testkube TestWorkflow API read, execution create/update/read/list,
+  and data persistence across an in-place MongoDB upgrade using a GAR image.
+spec:
+  system:
+    pureByDefault: true
+  config:
+    namespace:
+      type: string
+    apiURL:
+      type: string
+    mongodbRelease:
+      type: string
+    mongodbWorkloadKind:
+      type: string
+    mongodbWorkloadName:
+      type: string
+    gitRevision:
+      type: string
+    imageRegistry:
+      type: string
+    imageRepository:
+      type: string
+    baselineTag:
+      type: string
+    candidateTag:
+      type: string
+  content:
+    git:
+      uri: https://github.com/kubeshop/testkube-thirdparty-artifacts
+      revision: '{{ config.gitRevision }}'
+      paths:
+        - mongodb/helm
+  container:
+    image: alpine:3.20
+  pod:
+    serviceAccountName: testkube-api-server
+  steps:
+    - name: Install validation tools
+      shell: |
+        set -euo pipefail
+        apk add --no-cache curl jq
+        curl -fsSLo /usr/local/bin/kubectl \
+          "https://dl.k8s.io/release/$(curl -fsSL https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+        chmod +x /usr/local/bin/kubectl
+        curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | sh
+
+    - name: Create TestWorkflow data through the API
+      shell: |
+        set -euo pipefail
+        namespace='{{ config.namespace }}'
+        api='{{ config.apiURL }}'
+
+        baseline_image="$(kubectl get '{{ config.mongodbWorkloadKind }}/{{ config.mongodbWorkloadName }}' -n "$namespace" \
+          -o jsonpath='{.spec.template.spec.containers[?(@.name=="mongodb")].image}')"
+        test "$baseline_image" = "{{ config.imageRegistry }}/{{ config.imageRepository }}:{{ config.baselineTag }}"
+
+        cat <<'EOF' | kubectl apply -n "$namespace" -f -
+        apiVersion: testworkflows.testkube.io/v1
+        kind: TestWorkflow
+        metadata:
+          name: mongodb-upgrade-fixture
+        spec:
+          container:
+            image: alpine:3.20
+          steps:
+            - name: Produce an artifact
+              shell: |
+                mkdir -p /data/results
+                date -u +%FT%TZ > /data/results/created-at.txt
+              artifacts:
+                workingDir: /data
+                paths:
+                  - results/**
+        EOF
+
+        # The resource is created through Kubernetes, then read and executed
+        # through the Testkube API. This exercises the API's Mongo-backed read
+        # and execution-create paths rather than only testing Mongo connectivity.
+        curl --fail-with-body -sS "$api/v1/test-workflows/mongodb-upgrade-fixture" \
+          | jq -e '.name == "mongodb-upgrade-fixture"' >/dev/null
+
+        response="$(curl --fail-with-body -sS -X POST \
+          "$api/v1/test-workflows/mongodb-upgrade-fixture/executions" \
+          -H 'Content-Type: application/json' -d '{}')"
+        execution_id="$(echo "$response" | jq -er '.id')"
+        mkdir -p /data/mongodb-upgrade
+        echo "$execution_id" > /data/mongodb-upgrade/execution-id
+
+    - name: Wait for the baseline execution
+      shell: |
+        set -euo pipefail
+        namespace='{{ config.namespace }}'
+        api='{{ config.apiURL }}'
+        execution_id="$(cat /data/mongodb-upgrade/execution-id)"
+
+        for attempt in $(seq 1 120); do
+          curl --fail-with-body -sS "$api/v1/test-workflow-executions/$execution_id" \
+            | tee /data/mongodb-upgrade/before.json
+          status="$(jq -r '.result.status // .status // empty' /data/mongodb-upgrade/before.json)"
+          case "$status" in
+            passed) exit 0 ;;
+            failed|aborted) exit 1 ;;
+          esac
+          sleep 5
+        done
+        echo "Timed out waiting for baseline execution" >&2
+        exit 1
+
+    - name: Upgrade MongoDB from GAR while retaining its PVC
+      workingDir: /data/repo/mongodb/helm
+      shell: |
+        set -euo pipefail
+        namespace='{{ config.namespace }}'
+        helm upgrade '{{ config.mongodbRelease }}' . \
+          --namespace "$namespace" \
+          --reuse-values \
+          --set image.registry='{{ config.imageRegistry }}' \
+          --set image.repository='{{ config.imageRepository }}' \
+          --set image.tag='{{ config.candidateTag }}' \
+          --set image.pullPolicy=IfNotPresent
+        kubectl rollout status '{{ config.mongodbWorkloadKind }}/{{ config.mongodbWorkloadName }}' \
+          --namespace "$namespace" --timeout=15m
+        candidate_image="$(kubectl get '{{ config.mongodbWorkloadKind }}/{{ config.mongodbWorkloadName }}' -n "$namespace" \
+          -o jsonpath='{.spec.template.spec.containers[?(@.name=="mongodb")].image}')"
+        test "$candidate_image" = "{{ config.imageRegistry }}/{{ config.imageRepository }}:{{ config.candidateTag }}"
+
+    - name: Verify existing API data and create new data
+      shell: |
+        set -euo pipefail
+        namespace='{{ config.namespace }}'
+        api='{{ config.apiURL }}'
+        execution_id="$(cat /data/mongodb-upgrade/execution-id)"
+
+        curl --fail-with-body -sS "$api/v1/test-workflow-executions/$execution_id" \
+          | tee /data/mongodb-upgrade/after.json
+        test "$(jq -r '.id' /data/mongodb-upgrade/after.json)" = "$execution_id"
+        test "$(jq -r '.result.status // .status' /data/mongodb-upgrade/after.json)" = passed
+
+        # Listing is backed by Mongo aggregation/query code. Assert the
+        # pre-upgrade execution is still discoverable in the API collection.
+        curl --fail-with-body -sS \
+          "$api/v1/test-workflows/mongodb-upgrade-fixture/executions" \
+          | tee /data/mongodb-upgrade/executions-after-upgrade.json \
+          | jq -e --arg id "$execution_id" '.. | objects | select(.id? == $id)' >/dev/null
+
+        response="$(curl --fail-with-body -sS -X POST \
+          "$api/v1/test-workflows/mongodb-upgrade-fixture/executions" \
+          -H 'Content-Type: application/json' -d '{}')"
+        post_upgrade_id="$(echo "$response" | jq -er '.id')"
+        echo "$post_upgrade_id" > /data/mongodb-upgrade/post-upgrade-execution-id
+
+        for attempt in $(seq 1 120); do
+          status="$(curl --fail-with-body -sS \
+            "$api/v1/test-workflow-executions/$post_upgrade_id" \
+            | jq -r '.result.status // .status // empty')"
+          case "$status" in
+            passed) exit 0 ;;
+            failed|aborted) exit 1 ;;
+          esac
+          sleep 5
+        done
+        echo "Timed out waiting for post-upgrade execution" >&2
+        exit 1
+      artifacts:
+        workingDir: /data
+        paths:
+          - mongodb-upgrade/**
