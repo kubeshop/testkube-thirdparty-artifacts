@@ -2,7 +2,6 @@ apiVersion: testworkflows.testkube.io/v1
 kind: TestWorkflow
 metadata:
   name: mongodb-upgrade-validation
-  namespace: testkube
   labels:
     core-tests: thirdparty-upgrade
     service: mongodb

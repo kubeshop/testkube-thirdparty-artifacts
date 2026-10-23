@@ -68,17 +68,17 @@ these repository/environment secrets before enabling it:
 
 The job requires `GAR_LOCATION`, `GCP_PROJECT_ID_PROD`, `GKE_SA_KEY_PROD`,
 `GKE_WORKLOAD_IDENTITY_PROVIDER`, `GKE_SERVICE_ACCOUNT_EMAIL`,
-`DEV_GKE_CLUSTER_NAME`, `DEV_GKE_LOCATION`, and `GKE_PROJECT` secrets. The
-workflow uses the existing `testkube` namespace and `testkube-api-server`
-service as its runner, and installs OSS Testkube chart version `2.4.3` in each
-isolated namespace. The workload-identity service account must create
-namespaces and install Helm releases; the workflow's service account must
-upgrade MongoDB in the isolated namespace.
+`DEV_GKE_CLUSTER_NAME`, `DEV_GKE_LOCATION`, and `GKE_PROJECT` secrets. It
+installs the latest published OSS Testkube chart and runs the TestWorkflow from
+that same isolated namespace. The workload-identity service account must
+create namespaces and install Helm releases; the TestWorkflow service account
+must upgrade MongoDB in its own isolated namespace.
 
-For OSS, the job creates a namespace per run, installs `testkube-mongodb` at
+For OSS, the job creates one namespace per run, installs `testkube-mongodb` at
 the baseline GAR tag, and installs the Testkube chart with its bundled MongoDB
-disabled and `testkube-api.mongodb.dsn` set to the external service. It deletes
-the namespace after the validation regardless of the result.
+disabled and `testkube-api.mongodb.dsn` set to the external service. The
+TestWorkflow is applied and executed by that same Testkube installation. It
+deletes the namespace after the validation regardless of the result.
 
 To test an open PR manually, open **Actions → MongoDB GAR Upgrade
 Validation → Run workflow**, choose the PR branch, set `baseline_ref` to the

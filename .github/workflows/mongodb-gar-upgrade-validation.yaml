@@ -26,10 +26,7 @@ env:
   GAR_IMAGE: ${{ secrets.GAR_LOCATION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID_PROD }}/testkube/mongodb
   DEV_GKE_CLUSTER_NAME: ${{ secrets.DEV_GKE_CLUSTER_NAME }}
   DEV_GKE_LOCATION: ${{ secrets.DEV_GKE_LOCATION }}
-  DEV_GKE_PROJECT: ${{ secrets.DEV_GKE_PROJECT }}
-  TESTKUBE_RUNNER_NAMESPACE: testkube
-  TESTKUBE_RUNNER_SERVICE: testkube-api-server
-  TESTKUBE_CHART_VERSION: "2.4.3"
+  GKE_PROJECT: ${{ secrets.GKE_PROJECT }}
 
 jobs:
   build-candidate:
@@ -129,7 +126,6 @@ jobs:
           helm repo update testkube
           helm upgrade --install testkube testkube/testkube \
             --namespace "$TARGET_NAMESPACE" \
-            --version "$TESTKUBE_CHART_VERSION" \
             --set mongodb.enabled=false \
             --set testkube-api.mongodb.enabled=true \
             --set-string testkube-api.mongodb.dsn='mongodb://testkube-mongodb:27017' \
@@ -142,8 +138,10 @@ jobs:
           BASELINE_TAG: ${{ needs.build-candidate.outputs.baseline }}
           CANDIDATE_TAG: ${{ needs.build-candidate.outputs.candidate }}
         run: |
-          kubectl apply -n "$TESTKUBE_RUNNER_NAMESPACE" -f test/mongodb-upgrade-validation.yaml
-          kubectl -n "$TESTKUBE_RUNNER_NAMESPACE" port-forward "svc/$TESTKUBE_RUNNER_SERVICE" 8088:8088 >/tmp/testkube-port-forward.log 2>&1 &
+          # The Testkube installation and the TestWorkflow runner share the
+          # isolated namespace with the MongoDB release under validation.
+          kubectl apply -n "$TARGET_NAMESPACE" -f test/mongodb-upgrade-validation.yaml
+          kubectl -n "$TARGET_NAMESPACE" port-forward svc/testkube-api-server 8088:8088 >/tmp/testkube-port-forward.log 2>&1 &
           port_forward_pid=$!
           trap 'kill "$port_forward_pid"' EXIT
           sleep 5
