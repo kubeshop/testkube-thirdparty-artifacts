@@ -562,8 +562,8 @@ jobs:
       - name: Run NATS Tests
         if: steps.update-files.outputs.has_update == 'true'
         run: |
-          echo "NATS tests would run here"
-          # TODO: Implement NATS-specific tests
+          docker build -t nats-test -f nats/nats-release.dockerfile nats
+          python3 test/nats-smoke.py nats-test
       
       - name: Set Result
         id: result
