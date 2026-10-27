@@ -522,8 +522,8 @@ jobs:
       - name: Run Dex Tests
         if: steps.update-files.outputs.has_update == 'true'
         run: |
-          echo "Dex tests would run here"
-          # TODO: Implement Dex-specific tests
+          docker build -t dex-test -f dex/dex-release.dockerfile dex
+          python3 test/dex-smoke.py dex-test
       
       - name: Set Result
         id: result
