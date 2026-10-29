@@ -1,0 +1,492 @@
+name: MinIO GAR Upgrade Validation
+
+on:
+  pull_request:
+    paths:
+      - minio/**
+  workflow_dispatch:
+    inputs:
+      baseline_ref:
+        description: Base branch or commit whose MinIO version is the baseline
+        required: true
+        default: main
+        type: string
+      pr_number:
+        description: PR number used in the temporary GAR image tag
+        required: false
+        type: string
+
+concurrency:
+  group: minio-gar-upgrade-${{ github.event.pull_request.number || inputs.pr_number || github.run_id }}
+  cancel-in-progress: true
+
+env:
+  GAR_IMAGE: ${{ secrets.GAR_LOCATION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID_PROD }}/testkube/minio
+  DEV_GKE_CLUSTER_NAME: ${{ secrets.DEV_GKE_CLUSTER_NAME }}
+  DEV_GKE_LOCATION: ${{ secrets.DEV_GKE_LOCATION }}
+  GKE_PROJECT: ${{ secrets.GKE_PROJECT }}
+
+jobs:
+  build-candidate:
+    # Fork PRs cannot use the GAR or dev-GKE secrets.
+    if: github.event.pull_request.head.repo.full_name == github.repository || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      id-token: write
+    environment: dev
+    outputs:
+      baseline: ${{ steps.versions.outputs.baseline }}
+      candidate: ${{ steps.versions.outputs.candidate }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Resolve baseline and candidate tags
+        id: versions
+        run: |
+          BASE_REF="${{ github.event.pull_request.base.sha || inputs.baseline_ref || github.sha }}"
+          CANDIDATE_SHA="${{ github.event.pull_request.head.sha || github.sha }}"
+          BASELINE_TAG="$(git show "$BASE_REF:minio/helm/Chart.yaml" | awk -F'"' '/^appVersion:/ { print $2; exit }')"
+          CANDIDATE_VERSION="$(awk -F'"' '/^appVersion:/ { print $2; exit }' minio/helm/Chart.yaml)"
+          test -n "$BASELINE_TAG"
+          test -n "$CANDIDATE_VERSION"
+          CANDIDATE_TAG="${CANDIDATE_VERSION}-pr-${{ github.event.pull_request.number || inputs.pr_number || github.run_id }}-${CANDIDATE_SHA::7}"
+          echo "baseline=$BASELINE_TAG" >> "$GITHUB_OUTPUT"
+          echo "candidate=$CANDIDATE_TAG" >> "$GITHUB_OUTPUT"
+          echo "::notice title=MinIO versions::Baseline: $BASELINE_TAG; candidate: $CANDIDATE_TAG"
+
+      - name: GAR login
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ secrets.GAR_LOCATION }}-docker.pkg.dev
+          username: _json_key
+          password: ${{ secrets.GKE_SA_KEY_PROD }}
+
+      - name: Build and publish immutable candidate image to GAR
+        uses: docker/build-push-action@v6
+        with:
+          context: minio
+          file: minio/minio-release.dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ${{ env.GAR_IMAGE }}:${{ steps.versions.outputs.candidate }}
+
+  validate-oss:
+    needs: build-candidate
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      id-token: write
+    environment: dev
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Authenticate to dev GKE using Federated Identity
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093
+        with:
+          workload_identity_provider: ${{ secrets.GKE_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GKE_SERVICE_ACCOUNT_EMAIL }}
+
+      - name: Configure dev GKE access
+        uses: google-github-actions/get-gke-credentials@v2
+        with:
+          cluster_name: ${{ secrets.DEV_GKE_CLUSTER_NAME }}
+          location: ${{ secrets.DEV_GKE_LOCATION }}
+          project_id: ${{ secrets.DEV_GKE_PROJECT }}
+
+      - name: Install Testkube CLI
+        run: |
+          VERSION="$(curl -fsSL https://api.github.com/repos/kubeshop/testkube/releases/latest | jq -r .tag_name)"
+          curl -fsSL "https://github.com/kubeshop/testkube/releases/download/${VERSION}/testkube_${VERSION#v}_Linux_x86_64.tar.gz" | tar -xz
+          sudo install kubectl-testkube /usr/local/bin/testkube
+          testkube disable telemetry
+
+      - name: Provision isolated OSS installation
+        env:
+          BASELINE_TAG: ${{ needs.build-candidate.outputs.baseline }}
+        run: |
+          TARGET_NAMESPACE="oss-minio-upgrade-pr-${{ github.event.pull_request.number || github.run_id }}-${GITHUB_RUN_ATTEMPT}"
+          TESTKUBE_RELEASE="oss-minio-validation-${{ github.event.pull_request.number || github.run_id }}-${GITHUB_RUN_ATTEMPT}"
+          echo "TARGET_NAMESPACE=$TARGET_NAMESPACE" >> "$GITHUB_ENV"
+          echo "TESTKUBE_RELEASE=$TESTKUBE_RELEASE" >> "$GITHUB_ENV"
+
+          echo "::group::Provision isolated OSS installation"
+          echo "Creating validation namespace: $TARGET_NAMESPACE"
+          # Keep this run isolated so cleanup cannot affect a shared Testkube installation.
+          kubectl create namespace "$TARGET_NAMESPACE"
+          # The credentials are deliberately fixed test credentials for this disposable installation.
+          kubectl -n "$TARGET_NAMESPACE" create secret generic testkube-minio-credentials \
+            --from-literal=root-user=minio \
+            --from-literal=root-password=minio123
+          helm dependency build minio/helm
+
+          # --- Install the baseline third-party MinIO release and create the buckets Testkube uses ---
+          helm upgrade --install testkube-minio minio/helm \
+            --namespace "$TARGET_NAMESPACE" \
+            --set image.registry='${{ secrets.GAR_LOCATION }}-docker.pkg.dev' \
+            --set image.repository='${{ secrets.GCP_PROJECT_ID_PROD }}/testkube/minio' \
+            --set image.tag="$BASELINE_TAG" \
+            --set image.pullPolicy=IfNotPresent \
+            --set auth.existingSecret=testkube-minio-credentials \
+            --set-string 'defaultBuckets=testkube-artifacts\,testkube-logs' \
+            --set deployment.updateStrategy.type=Recreate \
+            --wait --timeout=15m
+          echo "::notice title=Baseline MinIO ready::Image tag: $BASELINE_TAG"
+
+          # --- Install OSS without its bundled MinIO; artifacts and logs both use the external release ---
+          testkube init standalone-agent --name "$TESTKUBE_RELEASE" --namespace "$TARGET_NAMESPACE" --no-confirm --no-minio --helm-set testkube-api.storage.endpoint=testkube-minio:9000 --helm-set testkube-api.storage.secretNameAccessKeyId=testkube-minio-credentials --helm-set testkube-api.storage.secretKeyAccessKeyId=root-user --helm-set testkube-api.storage.secretNameSecretAccessKey=testkube-minio-credentials --helm-set testkube-api.storage.secretKeySecretAccessKey=root-password --helm-set testkube-api.storage.bucket=testkube-artifacts --helm-set testkube-api.logs.storage=minio --helm-set testkube-api.logs.bucket=testkube-logs --helm-set testkube-operator.installCRD=false --helm-arg wait= --helm-arg timeout=15m
+
+          kubectl rollout status deployment/testkube-minio -n "$TARGET_NAMESPACE" --timeout=15m
+          kubectl rollout status deployment/testkube-api-server -n "$TARGET_NAMESPACE" --timeout=15m
+          echo "::notice title=Testkube OSS ready::Namespace: $TARGET_NAMESPACE"
+          echo "::notice title=External storage configured::Testkube artifacts and logs use testkube-minio:9000"
+          kubectl get deployments,pods,services -n "$TARGET_NAMESPACE"
+          echo "::endgroup::"
+
+      - name: Validate Testkube artifacts across the MinIO upgrade
+        env:
+          CANDIDATE_TAG: ${{ needs.build-candidate.outputs.candidate }}
+          TEST_WORKFLOW_NAME: postman-workflow-smoke-junit
+          TEST_WORKFLOW_URL: https://raw.githubusercontent.com/kubeshop/testkube/main/test/postman/crd-workflow/smoke.yaml
+          BASELINE_ARTIFACT_NAME: artifacts/junit-report.xml
+        run: |
+          set -euo pipefail
+          port_forward_pid=""
+
+          cleanup() {
+            if [ -n "$port_forward_pid" ]; then
+              kill "$port_forward_pid" >/dev/null 2>&1 || true
+            fi
+          }
+          trap cleanup EXIT
+
+          # --- Apply a TestWorkflow from testkube repo that writes a JUnit report, which is stored in MinIO ---
+          curl -fsSL "$TEST_WORKFLOW_URL" | kubectl apply -n "$TARGET_NAMESPACE" -f -
+          kubectl get testworkflow "$TEST_WORKFLOW_NAME" -n "$TARGET_NAMESPACE"
+
+          # --- The API is ClusterIP-only, so the GitHub runner cannot reach it directly. Port-forward exposes it temporarily on localhost for Testkube CLI calls and is removed by cleanup ---
+          echo "::group::Testkube API connectivity"
+          echo "Starting a local tunnel to the Testkube API"
+          kubectl -n "$TARGET_NAMESPACE" port-forward svc/testkube-api-server 8088:8088 >/tmp/testkube-port-forward.log 2>&1 &
+          port_forward_pid=$!
+          for attempt in $(seq 1 30); do
+            curl -fsS http://127.0.0.1:8088/health >/dev/null 2>&1 && break
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:8088/health >/dev/null
+          echo "::notice title=Testkube API ready::Local tunnel established at http://127.0.0.1:8088"
+          echo "::endgroup::"
+
+          # --- Run a TestWorkflow using the baseline MinIO image ---
+          echo "::group::Baseline TestWorkflow execution"
+          baseline_execution_id="$(testkube --client direct --api-uri http://127.0.0.1:8088 --namespace "$TARGET_NAMESPACE" --output go --go-template '{{.Id}}' run tw "$TEST_WORKFLOW_NAME" | tr -d '\r\n')"
+          echo "Started baseline execution: $baseline_execution_id"
+          testkube --client direct --api-uri http://127.0.0.1:8088 --namespace "$TARGET_NAMESPACE" watch twe "$baseline_execution_id"
+          testkube --client direct --api-uri http://127.0.0.1:8088 --namespace "$TARGET_NAMESPACE" get artifact "$baseline_execution_id" | grep -F "$BASELINE_ARTIFACT_NAME"
+          echo "Baseline artifact: $BASELINE_ARTIFACT_NAME"
+          echo "::notice title=Baseline artifact stored::Execution ID: $baseline_execution_id"
+          echo "::endgroup::"
+
+          # --- Upgrade the same MinIO release and PVC to the candidate GAR image, retaining baseline objects ---
+          echo "::group::MinIO candidate upgrade"
+          helm dependency build minio/helm
+          helm upgrade testkube-minio minio/helm \
+            --namespace "$TARGET_NAMESPACE" \
+            --reuse-values \
+            --set image.registry='${{ secrets.GAR_LOCATION }}-docker.pkg.dev' \
+            --set image.repository='${{ secrets.GCP_PROJECT_ID_PROD }}/testkube/minio' \
+            --set image.tag="$CANDIDATE_TAG" \
+            --set image.pullPolicy=IfNotPresent \
+            --set deployment.updateStrategy.type=Recreate \
+            --wait --timeout=15m
+          kubectl rollout status deployment/testkube-minio -n "$TARGET_NAMESPACE" --timeout=15m
+
+          # --- Check if all components are running after the MinIo upgrade ---
+          echo "Waiting for Testkube components to remain ready after the MinIO restart"
+          for workload in $(kubectl get deployments -n "$TARGET_NAMESPACE" -o name); do
+            echo "Checking Deployment rollout: $workload"
+            kubectl rollout status "$workload" -n "$TARGET_NAMESPACE" --timeout=5m
+          done
+          for workload in $(kubectl get statefulsets -n "$TARGET_NAMESPACE" -o name); do
+            echo "Checking StatefulSet rollout: $workload"
+            kubectl rollout status "$workload" -n "$TARGET_NAMESPACE" --timeout=5m
+          done
+          not_ready_pods="$(kubectl -n "$TARGET_NAMESPACE" get pods -o json | jq -r '
+            .items[]
+            | select(.status.phase != "Succeeded" and .status.phase != "Failed")
+            | select(any(.status.conditions[]?; .type == "Ready" and .status == "True") | not)
+            | .metadata.name')"
+          if [ -n "$not_ready_pods" ]; then
+            echo "::error::Testkube pods are not Ready after the MinIO upgrade: $not_ready_pods"
+            kubectl get pods -n "$TARGET_NAMESPACE" -o wide
+            exit 1
+          fi
+          echo "::notice title=MinIO candidate ready::Image tag: $CANDIDATE_TAG"
+          echo "::notice title=Testkube components ready::All Testkube pods are Ready"
+          kubectl get deployment/testkube-minio -n "$TARGET_NAMESPACE"
+          kubectl get pods -n "$TARGET_NAMESPACE"
+          echo "::endgroup::"
+
+          # --- Check if the tw and the artifact still exist and can be downloaded ---
+          echo "::group::MinIO persistence checks"
+          testkube --client direct --api-uri http://127.0.0.1:8088 --namespace "$TARGET_NAMESPACE" get artifact "$baseline_execution_id" | grep -F "$BASELINE_ARTIFACT_NAME"
+          echo "✓ Baseline artifact is still listed: $BASELINE_ARTIFACT_NAME"
+          rm -rf /tmp/baseline-artifact
+          testkube --client direct --api-uri http://127.0.0.1:8088 --namespace "$TARGET_NAMESPACE" download artifact "$baseline_execution_id" "$BASELINE_ARTIFACT_NAME" /tmp/baseline-artifact
+          test -s "/tmp/baseline-artifact/$BASELINE_ARTIFACT_NAME"
+          echo "✓ Baseline artifact is downloadable"
+          testkube --client direct --api-uri http://127.0.0.1:8088 --namespace "$TARGET_NAMESPACE" get twe "$baseline_execution_id" --logs-only >/tmp/baseline-logs
+          test -s /tmp/baseline-logs
+          echo "✓ Baseline execution logs are readable"
+          echo "::notice title=MinIO persistence passed::Baseline artifact and logs remain readable"
+          echo "::endgroup::"
+
+          # --- Prove the upgraded MinIO accepts new Testkube artifacts too ---
+          echo "::group::Post-upgrade TestWorkflow execution"
+          post_upgrade_execution_id="$(testkube --client direct --api-uri http://127.0.0.1:8088 --namespace "$TARGET_NAMESPACE" --output go --go-template '{{.Id}}' run tw "$TEST_WORKFLOW_NAME" | tr -d '\r\n')"
+          echo "Started post-upgrade execution: $post_upgrade_execution_id"
+          testkube --client direct --api-uri http://127.0.0.1:8088 --namespace "$TARGET_NAMESPACE" watch twe "$post_upgrade_execution_id"
+          testkube --client direct --api-uri http://127.0.0.1:8088 --namespace "$TARGET_NAMESPACE" get artifact "$post_upgrade_execution_id" | grep -F "$BASELINE_ARTIFACT_NAME"
+          echo "✓ New artifact is stored by the upgraded MinIO"
+          echo "::notice title=Post-upgrade artifact stored::Execution ID: $post_upgrade_execution_id"
+          echo "::endgroup::"
+
+      - name: Collect validation failure diagnostics
+        if: failure()
+        run: |
+          set +e
+          echo "::group::MinIO validation failure diagnostics"
+          echo "::group::Pods"
+          kubectl -n "$TARGET_NAMESPACE" get pods -o wide
+          echo "::endgroup::"
+          echo "::group::Events"
+          kubectl -n "$TARGET_NAMESPACE" get events --sort-by=.lastTimestamp
+          echo "::endgroup::"
+          echo "::group::Testkube API logs"
+          kubectl -n "$TARGET_NAMESPACE" logs deployment/testkube-api-server --all-containers --tail=200
+          echo "::endgroup::"
+          echo "::group::MinIO logs"
+          kubectl -n "$TARGET_NAMESPACE" logs deployment/testkube-minio --all-containers --tail=200
+          echo "::endgroup::"
+          echo "::group::Testkube API port-forward"
+          test -f /tmp/testkube-port-forward.log && cat /tmp/testkube-port-forward.log
+          echo "::endgroup::"
+          echo "::endgroup::"
+
+      - name: Remove isolated OSS installation
+        if: always()
+        run: |
+          kubectl delete clusterrole "crd-reader-$TESTKUBE_RELEASE" "watchers-role-$TESTKUBE_RELEASE" --ignore-not-found
+          kubectl delete clusterrolebinding "crd-reader-$TESTKUBE_RELEASE" "watchers-rb-$TESTKUBE_RELEASE" --ignore-not-found
+          kubectl delete namespace "$TARGET_NAMESPACE" --ignore-not-found --wait=false
+
+  validate-enterprise:
+    needs: build-candidate
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      id-token: write
+    environment: dev
+    env:
+      BASELINE_TAG: ${{ needs.build-candidate.outputs.baseline }}
+      CANDIDATE_TAG: ${{ needs.build-candidate.outputs.candidate }}
+      LICENSE_KEY: ${{ secrets.LICENSE_KEY }}
+      MINIO_RELEASE: testkube-enterprise-minio
+      MINIO_CHART: minio/helm
+      TEST_WORKFLOW_NAME: postman-workflow-smoke-junit
+      TEST_WORKFLOW_URL: https://raw.githubusercontent.com/kubeshop/testkube/main/test/postman/crd-workflow/smoke.yaml
+      ARTIFACT_NAME: artifacts/junit-report.xml
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Authenticate to dev GKE using Federated Identity
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093
+        with:
+          workload_identity_provider: ${{ secrets.GKE_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GKE_SERVICE_ACCOUNT_EMAIL }}
+
+      - name: Configure dev GKE access
+        uses: google-github-actions/get-gke-credentials@v2
+        with:
+          cluster_name: ${{ secrets.DEV_GKE_CLUSTER_NAME }}
+          location: ${{ secrets.DEV_GKE_LOCATION }}
+          project_id: ${{ secrets.GKE_PROJECT }}
+
+      - name: Install Testkube CLI and Expect
+        run: |
+          VERSION="$(curl -fsSL https://api.github.com/repos/kubeshop/testkube/releases/latest | jq -r .tag_name)"
+          curl -fsSL "https://github.com/kubeshop/testkube/releases/download/${VERSION}/testkube_${VERSION#v}_Linux_x86_64.tar.gz" | tar -xz
+          sudo install kubectl-testkube /usr/local/bin/testkube
+          sudo apt-get update
+          sudo apt-get install -y expect
+          testkube disable telemetry
+
+      - name: Install Enterprise with baseline MinIO
+        run: |
+          set -euo pipefail
+          TARGET_NAMESPACE="enterprise-minio-upgrade-pr-${{ github.event.pull_request.number || inputs.pr_number || github.run_id }}-${GITHUB_RUN_ATTEMPT}"
+          echo "TARGET_NAMESPACE=$TARGET_NAMESPACE" >> "$GITHUB_ENV"
+          kubectl create namespace "$TARGET_NAMESPACE"
+
+          registry='${{ secrets.GAR_LOCATION }}-docker.pkg.dev'
+          repository='${{ secrets.GCP_PROJECT_ID_PROD }}/testkube/minio'
+          echo "::group::Enterprise baseline MinIO installation"
+          kubectl -n "$TARGET_NAMESPACE" create secret generic testkube-minio-credentials \
+            --from-literal=root-user=minio \
+            --from-literal=root-password=minio123
+          helm dependency build "$MINIO_CHART"
+          helm upgrade --install "$MINIO_RELEASE" "$MINIO_CHART" \
+            --namespace "$TARGET_NAMESPACE" \
+            --set fullnameOverride=testkube-enterprise-minio \
+            --set image.registry="$registry" \
+            --set image.repository="$repository" \
+            --set image.tag="$BASELINE_TAG" \
+            --set image.pullPolicy=IfNotPresent \
+            --set auth.existingSecret=testkube-minio-credentials \
+            --set-string 'defaultBuckets=testkube-artifacts\,testkube-logs' \
+            --set deployment.updateStrategy.type=Recreate \
+            --wait --timeout=15m
+
+          # --- Install Enterprise without its bundled MinIO so it uses the external release above ---
+          export TESTKUBE_INIT_COMMAND="testkube init demo --namespace $TARGET_NAMESPACE --no-confirm --license $LICENSE_KEY --helm-arg wait= --helm-arg timeout=15m --helm-set minio.enabled=false --helm-set dex.rbac.createClusterScoped=false --verbose"
+          expect -c '
+            set timeout -1
+            spawn {*}$env(TESTKUBE_INIT_COMMAND)
+            expect "Do you want to continue?"
+            send "y"
+            expect "Do you want to open the dashboard?"
+            send "n"
+            expect eof
+            lassign [wait] pid spawnid os_error_flag exit_status
+            exit $exit_status
+          '
+          helm -n "$TARGET_NAMESPACE" status testkube
+          kubectl -n "$TARGET_NAMESPACE" get deployment/testkube-enterprise-api
+          echo "::notice title=Enterprise baseline ready::MinIO image tag: $BASELINE_TAG"
+          echo "::endgroup::"
+
+      - name: Validate Testkube artifacts across the Enterprise MinIO upgrade
+        run: |
+          set -euo pipefail
+          port_forward_pids=()
+
+          cleanup() {
+            for pid in "${port_forward_pids[@]}"; do
+              kill "$pid" >/dev/null 2>&1 || true
+            done
+          }
+          trap cleanup EXIT
+
+          # --- Start a Kubernetes port-forward and wait until its local endpoint is reachable ---
+          start_port_forward() {
+            local service="$1" port="$2" endpoint="$3" log_file="$4"
+            kubectl -n "$TARGET_NAMESPACE" port-forward "$service" "$port:$port" >"$log_file" 2>&1 &
+            port_forward_pids+=("$!")
+            for attempt in $(seq 1 30); do
+              curl -fsS "http://127.0.0.1:$port$endpoint" >/dev/null 2>&1 && return 0
+              sleep 1
+            done
+            curl -fsS "http://127.0.0.1:$port$endpoint" >/dev/null
+          }
+
+          # --- Authenticate through Dex and configure the CLI for the Enterprise API ---
+          start_port_forward svc/testkube-enterprise-api 8088 /health /tmp/enterprise-api-port-forward.log
+          start_port_forward svc/testkube-enterprise-dex 5556 /keys /tmp/enterprise-dex-port-forward.log
+          id_token="$(curl -fsS http://127.0.0.1:5556/token -d grant_type=password -d username=admin@example.com -d password=password -d 'scope=openid email groups offline_access' -d client_id=testkube-enterprise -d client_secret=QWkVzs3nct6HZM5hxsPzwaZtq | jq -er '.id_token')"
+          api_token="$(curl -fsS -X POST http://127.0.0.1:8088/organizations/tkcorg_demo/tokens -H "Authorization: Bearer $id_token" -H 'Content-Type: application/json' -d '{"name":"minio-upgrade-validation","scopes":[{"resource":"org","identifier":"tkcorg_demo","role":"admin"},{"resource":"env","identifier":"tkcenv_my-first-environment","role":"admin"}]}' | jq -er '.token')"
+          testkube set context --namespace "$TARGET_NAMESPACE" --api-uri-override http://127.0.0.1:8088 --api-key "$api_token" --org-id tkcorg_demo --env-id tkcenv_my-first-environment
+
+          # --- Create smoke TestWorkflows through the Testkube API ---
+          curl -fsSL "$TEST_WORKFLOW_URL" -o /tmp/smoke.yaml
+          awk 'BEGIN{n=0} /^---$/{n++; next} {print > ("/tmp/tw_" n ".yaml")}' /tmp/smoke.yaml
+          for workflow in /tmp/tw_*.yaml; do
+            testkube create testworkflow --update -f "$workflow"
+          done
+
+          echo "::group::Enterprise baseline TestWorkflow execution"
+          baseline_execution_id="$(testkube --output go --go-template '{{.Id}}' run tw "$TEST_WORKFLOW_NAME" | tr -d '\r\n')"
+          testkube watch twe "$baseline_execution_id"
+          testkube get artifact "$baseline_execution_id" | grep -F "$ARTIFACT_NAME"
+          echo "Baseline execution and artifact stored: $baseline_execution_id"
+          echo "::endgroup::"
+
+          # --- Enterprise MinIO candidate upgrade ---
+          registry='${{ secrets.GAR_LOCATION }}-docker.pkg.dev'
+          repository='${{ secrets.GCP_PROJECT_ID_PROD }}/testkube/minio'
+          echo "::group::Enterprise MinIO candidate upgrade"
+          helm dependency build "$MINIO_CHART"
+          helm upgrade "$MINIO_RELEASE" "$MINIO_CHART" \
+            --namespace "$TARGET_NAMESPACE" \
+            --reuse-values \
+            --set image.registry="$registry" \
+            --set image.repository="$repository" \
+            --set image.tag="$CANDIDATE_TAG" \
+            --set image.pullPolicy=IfNotPresent \
+            --set deployment.updateStrategy.type=Recreate \
+            --wait --timeout=15m
+          kubectl -n "$TARGET_NAMESPACE" rollout status deployment/$MINIO_RELEASE --timeout=15m
+          for workload in $(kubectl -n "$TARGET_NAMESPACE" get deployments,statefulsets -o name); do
+            kubectl -n "$TARGET_NAMESPACE" rollout status "$workload" --timeout=5m
+          done
+          echo "::notice title=Enterprise MinIO candidate ready::Image tag: $CANDIDATE_TAG"
+          echo "::endgroup::"
+
+          # --- Enterprise persistence checks ---
+          echo "::group::Enterprise MinIO persistence checks"
+          start_port_forward "svc/$MINIO_RELEASE" 9000 /minio/health/live /tmp/enterprise-minio-port-forward.log
+
+          testkube --output go --go-template '{{.Name}}' get tw "$TEST_WORKFLOW_NAME" | grep -Fx "$TEST_WORKFLOW_NAME"
+          IFS=, read -r persisted_id persisted_status <<< "$(testkube --output go --go-template '{{.Id}},{{.Result.Status}}' get twe "$baseline_execution_id" | tr -d '\r\n')"
+          test "$persisted_id" = "$baseline_execution_id"
+          test "$persisted_status" = passed
+
+          testkube get artifact "$baseline_execution_id" | grep -F "$ARTIFACT_NAME"
+          rm -rf /tmp/enterprise-baseline-artifact
+
+          testkube download artifact "$baseline_execution_id" "$ARTIFACT_NAME" /tmp/enterprise-baseline-artifact
+          test -s "/tmp/enterprise-baseline-artifact/$ARTIFACT_NAME"
+
+          testkube get twe "$baseline_execution_id" --logs-only >/tmp/enterprise-baseline-logs
+          test -s /tmp/enterprise-baseline-logs
+          echo "Baseline execution, artifact, and logs are retained"
+          echo "::endgroup::"
+
+          # --- Enterprise post-upgrade execution and artifact ---
+          echo "::group::Enterprise post-upgrade TestWorkflow execution"
+          post_upgrade_execution_id="$(testkube --output go --go-template '{{.Id}}' run tw "$TEST_WORKFLOW_NAME" | tr -d '\r\n')"
+          testkube watch twe "$post_upgrade_execution_id"
+          testkube get artifact "$post_upgrade_execution_id" | grep -F "$ARTIFACT_NAME"
+          echo "Post-upgrade execution and artifact stored: $post_upgrade_execution_id"
+          echo "::endgroup::"
+
+      - name: Collect Enterprise validation failure diagnostics
+        if: failure()
+        run: |
+          echo "::group::Pods"
+          kubectl -n "$TARGET_NAMESPACE" get pods -o wide || true
+          echo "::endgroup::"
+          echo "::group::Warning events"
+          kubectl -n "$TARGET_NAMESPACE" get events --field-selector type=Warning --sort-by=.lastTimestamp || true
+          echo "::endgroup::"
+          echo "::group::Enterprise API logs"
+          kubectl -n "$TARGET_NAMESPACE" logs deployment/testkube-enterprise-api --all-containers --tail=100 || true
+          echo "::endgroup::"
+          echo "::group::Enterprise MinIO logs"
+          kubectl -n "$TARGET_NAMESPACE" logs deployment/testkube-enterprise-minio --all-containers --tail=100 || true
+          echo "::endgroup::"
+          echo "::endgroup::"
+
+      - name: Remove isolated Enterprise installation
+        if: always()
+        run: kubectl delete namespace "$TARGET_NAMESPACE" --ignore-not-found --wait=false
