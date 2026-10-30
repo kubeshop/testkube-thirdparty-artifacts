@@ -447,9 +447,7 @@ jobs:
 
           authenticate_testkube_cli() {
             local token_name="$1" id_token api_token
-            # Exchange the demo Dex credentials for a new Testkube API token.
             id_token="$(curl -fsS http://127.0.0.1:5556/token -d grant_type=password -d username=admin@example.com -d password=password -d 'scope=openid email groups offline_access' -d client_id=testkube-enterprise -d client_secret=QWkVzs3nct6HZM5hxsPzwaZtq | jq -er '.id_token')"
-            # Token names must be unique within the temporary Enterprise installation.
             api_token="$(curl --fail-with-body -sS -X POST http://127.0.0.1:8088/organizations/tkcorg_demo/tokens -H "Authorization: Bearer $id_token" -H 'Content-Type: application/json' -d "{\"name\":\"$token_name\",\"scopes\":[{\"resource\":\"org\",\"identifier\":\"tkcorg_demo\",\"role\":\"admin\"},{\"resource\":\"env\",\"identifier\":\"tkcenv_my-first-environment\",\"role\":\"admin\"}]}" | jq -er '.token')"
             testkube set context --namespace "$TARGET_NAMESPACE" --api-uri-override http://127.0.0.1:8088 --api-key "$api_token" --org-id tkcorg_demo --env-id tkcenv_my-first-environment
           }
@@ -494,15 +492,17 @@ jobs:
           echo "::notice title=Enterprise PostgreSQL candidate ready::Image tag: $CANDIDATE_TAG"
           echo "::endgroup::"
 
-          # Restart the API to recreate its PostgreSQL connection pool.
+          # --- Restart the API to recreate its PostgreSQL connection pool ---
           echo "::group::Restart Enterprise API after PostgreSQL upgrade"
           kubectl -n "$TARGET_NAMESPACE" rollout restart deployment/testkube-enterprise-api
           kubectl -n "$TARGET_NAMESPACE" rollout status deployment/testkube-enterprise-api --timeout=5m
-          # The old tunnel points to the replaced API pod, so create a new one.
+
+          # --- The old tunnel points to the replaced API pod, so create a new one ---
           kill "${port_forward_pids[0]}" >/dev/null 2>&1 || true
           port_forward_pids[0]=""
           start_port_forward svc/testkube-enterprise-api 8088 /health /tmp/enterprise-api-port-forward.log
-          # The restarted API must be used with a token issued after the database upgrade.
+
+          # --- The restarted API must be used with a token issued after the database upgrade ---
           authenticate_testkube_cli postgresql-upgrade-validation-post-upgrade
           echo "::notice title=Enterprise API restarted::Connected with a fresh PostgreSQL connection and token"
           echo "::endgroup::"

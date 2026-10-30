@@ -317,6 +317,7 @@ jobs:
           registry='${{ secrets.GAR_LOCATION }}-docker.pkg.dev'
           repository='${{ secrets.GCP_PROJECT_ID_PROD }}/testkube/mongodb'
           echo "::group::Enterprise baseline MongoDB"
+
           # --- Deploy MongoDB independently so its upgrade is isolated from Testkube ---
           helm dependency build "$MONGODB_CHART"
           helm upgrade --install "$MONGODB_RELEASE" "$MONGODB_CHART" \
@@ -333,6 +334,7 @@ jobs:
           echo "::group::Enterprise Testkube installation"
           # --- Disable the bundled MongoDB and connect Enterprise to the external service ---
           export TESTKUBE_INIT_COMMAND="testkube init demo --namespace $TARGET_NAMESPACE --no-confirm --license $LICENSE_KEY --helm-arg wait= --helm-arg timeout=15m --helm-set dex.rbac.createClusterScoped=false --helm-set testkube-ai-service.enabled=false --helm-set mongodb.enabled=false --helm-set postgresql.enabled=false --helm-set global.postgres.enabled=false --helm-set testkube-cloud-api.api.postgres.enabled=false --helm-set testkube-worker-service.api.postgres.enabled=false --helm-set global.mongo.enabled=true --helm-set global.mongo.dsn=$MONGODB_DSN --helm-set testkube-cloud-api.api.mongo.enabled=true --helm-set testkube-cloud-api.api.mongo.dsn=$MONGODB_DSN --helm-set testkube-worker-service.api.mongo.enabled=true --helm-set testkube-worker-service.api.mongo.dsn=$MONGODB_DSN --verbose"
+
           expect -c '
             set timeout 300
             spawn {*}$env(TESTKUBE_INIT_COMMAND)
@@ -344,6 +346,7 @@ jobs:
             lassign [wait] pid spawnid os_error_flag exit_status
             exit $exit_status
           '
+
           helm -n "$TARGET_NAMESPACE" status testkube
           kubectl -n "$TARGET_NAMESPACE" get deployment/testkube-enterprise-api
           echo "::endgroup::"

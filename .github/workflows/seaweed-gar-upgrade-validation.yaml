@@ -176,6 +176,7 @@ jobs:
             --helm-set testkube-cloud-api.api.minio.signing.hostname=$seaweed_endpoint \
             --helm-set testkube-cloud-api.api.minio.signing.secure=false \
             --verbose"
+
           expect -c '
             set timeout 300
             spawn {*}$env(TESTKUBE_INIT_COMMAND)
@@ -254,12 +255,13 @@ jobs:
             --set image.repository="$repository" \
             --set image.tag="$CANDIDATE_TAG" \
             --wait --timeout=15m
+
           # Confirm the external storage and Testkube components remain Ready.
           for workload in $(kubectl -n "$TARGET_NAMESPACE" get deployments,statefulsets -o name); do
             kubectl -n "$TARGET_NAMESPACE" rollout status "$workload" --timeout=5m
           done
 
-          # Confirm API and worker still use the external SeaweedFS S3 endpoint.
+          # --- Confirm API and worker still use the external SeaweedFS S3 endpoint ---
           curl -fsS http://127.0.0.1:8088/health/readiness >/dev/null
           for deployment in testkube-enterprise-api testkube-enterprise-worker-service; do
             kubectl -n "$TARGET_NAMESPACE" get deployment "$deployment" -o json | \

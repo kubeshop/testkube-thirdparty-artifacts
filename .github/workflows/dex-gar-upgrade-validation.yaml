@@ -126,6 +126,7 @@ jobs:
           echo "::group::Enterprise baseline Dex installation"
           echo "Installing Dex baseline image: $BASELINE_TAG"
           export TESTKUBE_INIT_COMMAND="testkube init demo --namespace $TARGET_NAMESPACE --no-confirm --license $LICENSE_KEY --helm-arg wait= --helm-arg timeout=15m --helm-set dex.image.registry=$registry --helm-set dex.image.repository=$repository --helm-set dex.image.tag=$BASELINE_TAG --helm-set dex.rbac.createClusterScoped=false --verbose"
+
           expect -c '
             set timeout 300
             spawn {*}$env(TESTKUBE_INIT_COMMAND)
@@ -137,6 +138,7 @@ jobs:
             lassign [wait] pid spawnid os_error_flag exit_status
             exit $exit_status
           '
+
           echo "Enterprise installation completed"
           helm -n "$TARGET_NAMESPACE" list
           kubectl -n "$TARGET_NAMESPACE" get deployment/testkube-enterprise-dex -o wide
@@ -198,6 +200,7 @@ jobs:
           echo "::group::Enterprise Dex candidate upgrade"
           echo "Upgrading Dex to candidate image: $CANDIDATE_TAG"
           export TESTKUBE_INIT_COMMAND="testkube init demo --namespace $TARGET_NAMESPACE --no-confirm --license $LICENSE_KEY --helm-arg wait= --helm-arg timeout=15m --helm-set dex.image.registry=$registry --helm-set dex.image.repository=$repository --helm-set dex.image.tag=$CANDIDATE_TAG --helm-set dex.rbac.createClusterScoped=false --verbose"
+
           expect -c '
             set timeout 300
             spawn {*}$env(TESTKUBE_INIT_COMMAND)
@@ -209,6 +212,7 @@ jobs:
             lassign [wait] pid spawnid os_error_flag exit_status
             exit $exit_status
           '
+          # --- Confirm the Testkube components remain Ready ---
           for workload in $(kubectl -n "$TARGET_NAMESPACE" get deployments,statefulsets -o name); do
             echo "Waiting for $workload"
             kubectl -n "$TARGET_NAMESPACE" rollout status "$workload" --timeout=5m

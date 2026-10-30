@@ -1,4 +1,4 @@
-name: Kubectl GAR Validation
+name: Kubectl GAR Upgrade Validation
 
 on:
   pull_request:
@@ -28,7 +28,6 @@ env:
 
 jobs:
   build-candidate:
-    # Fork PRs cannot use the GAR or dev-GKE secrets.
     if: github.event.pull_request.head.repo.full_name == github.repository || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 45
