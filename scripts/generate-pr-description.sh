@@ -83,6 +83,22 @@ get_service_config() {
       SEMANTIC_VERSION="$NEW_VERSION"
       VERSION_VAR="SEAWEEDFS_VERSION"
       ;;
+    dex)
+      GITHUB_REPO="dexidp/dex"
+      DOCKER_IMAGE="dexidp/dex"
+      DISPLAY_NAME="Dex"
+      DOCS_URL="https://dexidp.io/docs/"
+      SEMANTIC_VERSION="${NEW_VERSION#v}"
+      VERSION_VAR="DEX_VERSION"
+      ;;
+    nats)
+      GITHUB_REPO="nats-io/nats-server"
+      DOCKER_IMAGE="nats"
+      DISPLAY_NAME="NATS"
+      DOCS_URL="https://docs.nats.io/"
+      SEMANTIC_VERSION="${NEW_VERSION%-alpine}"
+      VERSION_VAR="NATS_VERSION"
+      ;;
     *)
       echo "Error: Unknown service: $SERVICE_NAME"
       exit 1
@@ -207,6 +223,8 @@ case "$SERVICE_NAME" in
   postgresql) DOCKERFILE="postgresql-release.dockerfile" ;;
   kubectl) DOCKERFILE="kubectl-release.dockerfile" ;;
   seaweed) DOCKERFILE="seaweedfs-release.dockerfile" ;;
+  dex) DOCKERFILE="dex-release.dockerfile" ;;
+  nats) DOCKERFILE="nats-release.dockerfile" ;;
 esac
 
 # Build final PR description
