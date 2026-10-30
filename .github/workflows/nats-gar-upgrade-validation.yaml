@@ -123,7 +123,6 @@ jobs:
           registry='${{ secrets.GAR_LOCATION }}-docker.pkg.dev'
           repository='${{ secrets.GCP_PROJECT_ID_PROD }}/testkube/nats'
           # --- NATS is bundled with the Enterprise chart, so this installs the complete baseline release. ---
-          # --- The candidate upgrade below repeats this command with only the NATS image tag changed. ---
           export TESTKUBE_INIT_COMMAND="testkube init demo --namespace $TARGET_NAMESPACE --no-confirm --license $LICENSE_KEY --helm-arg wait= --helm-arg timeout=15m --helm-set nats.container.image.registry=$registry --helm-set nats.container.image.repository=$repository --helm-set nats.container.image.tag=$BASELINE_TAG --helm-set dex.rbac.createClusterScoped=false --helm-set testkube-ai-service.enabled=false --verbose"
 
           expect -c '
