@@ -1,0 +1,552 @@
+name: PostgreSQL GAR Upgrade Validation
+
+on:
+  pull_request:
+    paths:
+      - postgresql/**
+  workflow_dispatch:
+    inputs:
+      baseline_ref:
+        description: Base branch or commit whose MongoDB version is the baseline
+        required: true
+        default: main
+        type: string
+      pr_number:
+        description: PR number used in the temporary GAR image tag
+        required: false
+        type: string
+
+concurrency:
+  group: oss-postgresql-gar-upgrade-${{ github.event.pull_request.number || inputs.pr_number || github.run_id }}
+  cancel-in-progress: true
+
+env:
+  GAR_IMAGE: ${{ secrets.GAR_LOCATION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID_PROD }}/testkube/postgresql
+  DEV_GKE_CLUSTER_NAME: ${{ secrets.DEV_GKE_CLUSTER_NAME }}
+  DEV_GKE_LOCATION: ${{ secrets.DEV_GKE_LOCATION }}
+  GKE_PROJECT: ${{ secrets.GKE_PROJECT }}
+  CNPG_CLUSTER_CHART_VERSION: "0.8.1"
+
+jobs:
+  build-candidate:
+    # Fork PRs cannot use the GAR or dev-GKE secrets.
+    if: github.event.pull_request.head.repo.full_name == github.repository || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      id-token: write
+    environment: dev
+    outputs:
+      baseline: ${{ steps.versions.outputs.baseline }}
+      candidate: ${{ steps.versions.outputs.candidate }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Resolve baseline and candidate tags
+        id: versions
+        run: |
+          BASE_REF="${{ github.event.pull_request.base.sha || inputs.baseline_ref || github.sha }}"
+          CANDIDATE_SHA="${{ github.event.pull_request.head.sha || github.sha }}"
+          BASELINE_TAG="$(git show "$BASE_REF:postgresql/helm/Chart.yaml" | awk -F'"' '/^appVersion:/ { print $2; exit }')"
+          test -n "$BASELINE_TAG"
+          POSTGRESQL_VERSION="$(awk -F: '/^FROM postgres:/ { print $2; exit }' postgresql/postgresql-release.dockerfile)"
+          test -n "$POSTGRESQL_VERSION"
+          # CloudNativePG validates the PostgreSQL version from the image tag.
+          CANDIDATE_TAG="${POSTGRESQL_VERSION}-pr-${{ github.event.pull_request.number || inputs.pr_number || github.run_id }}-${CANDIDATE_SHA::12}"
+          echo "baseline=$BASELINE_TAG" >> "$GITHUB_OUTPUT"
+          echo "candidate=$CANDIDATE_TAG" >> "$GITHUB_OUTPUT"
+          echo "::notice title=PostgreSQL versions::Baseline: $BASELINE_TAG; candidate: $CANDIDATE_TAG"
+
+      - name: GAR login
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ secrets.GAR_LOCATION }}-docker.pkg.dev
+          username: _json_key
+          password: ${{ secrets.GKE_SA_KEY_PROD }}
+
+      - name: Build and publish immutable candidate image to GAR
+        uses: docker/build-push-action@v6
+        with:
+          context: postgresql
+          file: postgresql/postgresql-release.dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ${{ env.GAR_IMAGE }}:${{ steps.versions.outputs.candidate }}
+
+  validate-oss:
+    needs: build-candidate
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      id-token: write
+    environment: dev
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Authenticate to dev GKE using Federated Identity
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093
+        with:
+          workload_identity_provider: ${{ secrets.GKE_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GKE_SERVICE_ACCOUNT_EMAIL }}
+
+      - name: Configure dev GKE access
+        uses: google-github-actions/get-gke-credentials@v2
+        with:
+          cluster_name: ${{ secrets.DEV_GKE_CLUSTER_NAME }}
+          location: ${{ secrets.DEV_GKE_LOCATION }}
+          project_id: ${{ secrets.GKE_PROJECT }}
+
+      - name: Install Testkube CLI
+        run: |
+          VERSION="$(curl -fsSL https://api.github.com/repos/kubeshop/testkube/releases/latest | jq -r .tag_name)"
+          curl -fsSL "https://github.com/kubeshop/testkube/releases/download/${VERSION}/testkube_${VERSION#v}_Linux_x86_64.tar.gz" | tar -xz
+          sudo install kubectl-testkube /usr/local/bin/testkube
+          testkube disable telemetry
+
+      - name: Provision isolated OSS installation
+        env:
+          BASELINE_TAG: ${{ needs.build-candidate.outputs.baseline }}
+        run: |
+          TARGET_NAMESPACE="oss-postgresql-upgrade-pr-${{ github.event.pull_request.number || github.run_id }}-${GITHUB_RUN_ATTEMPT}"
+          TESTKUBE_RELEASE="oss-postgresql-validation-${{ github.event.pull_request.number || github.run_id }}-${GITHUB_RUN_ATTEMPT}"
+          echo "TARGET_NAMESPACE=$TARGET_NAMESPACE" >> "$GITHUB_ENV"
+          echo "TESTKUBE_RELEASE=$TESTKUBE_RELEASE" >> "$GITHUB_ENV"
+
+          echo "::group::Provision isolated OSS installation"
+          echo "Creating validation namespace: $TARGET_NAMESPACE"
+          # Keep this run isolated so cleanup cannot affect a shared Testkube installation.
+          kubectl create namespace "$TARGET_NAMESPACE"
+          helm repo add cloudnative-pg https://cloudnative-pg.github.io/charts
+          helm repo update cloudnative-pg
+
+          # The dev cluster already provides the shared CloudNativePG operator. Create the same
+          # CNPG Cluster Testkube OSS uses, with its current production image as the baseline.
+          # Limit shutdown draining in this disposable CI cluster so a stuck client connection
+          # cannot delay the upgrade for the chart's 30-minute default.
+          helm upgrade --install testkube-postgresql cloudnative-pg/cluster \
+            --version "$CNPG_CLUSTER_CHART_VERSION" \
+            --namespace "$TARGET_NAMESPACE" \
+            --set fullnameOverride=testkube-postgresql \
+            --set-string version.postgresql=18 \
+            --set cluster.instances=1 \
+            --set cluster.imageName="kubeshop/testkube-postgres:$BASELINE_TAG" \
+            --set cluster.postgresUID=999 \
+            --set cluster.postgresGID=999 \
+            --set cluster.storage.size=5Gi \
+            --set cluster.stopDelay=60 \
+            --set cluster.initdb.database=backend \
+            --set cluster.initdb.owner=testkube \
+            --wait --timeout=15m
+          kubectl wait --namespace "$TARGET_NAMESPACE" \
+            --for=condition=Ready cluster.postgresql.cnpg.io/testkube-postgresql --timeout=15m
+          echo "::notice title=Baseline PostgreSQL ready::Image tag: $BASELINE_TAG"
+
+          # CNPG creates testkube-postgresql-app with a uri key for the initialized backend database.
+          # Install OSS and use that generated connection URI.
+          # Install OSS without bundled databases and supply CNPG's generated application connection URI.
+          testkube init standalone-agent --name "$TESTKUBE_RELEASE" --namespace "$TARGET_NAMESPACE" --no-confirm --no-mongo --no-postgres --helm-set testkube-api.mongodb.enabled=false --helm-set testkube-api.postgresql.enabled=true --helm-set testkube-api.postgresql.secretName=testkube-postgresql-app --helm-set testkube-api.postgresql.secretKey=uri --helm-set testkube-api.minio.podSecurityContext.fsGroup=1001 --helm-set testkube-operator.installCRD=false --helm-arg wait= --helm-arg timeout=15m
+
+          kubectl rollout status deployment/testkube-api-server -n "$TARGET_NAMESPACE" --timeout=15m
+          echo "::notice title=Testkube OSS ready::Namespace: $TARGET_NAMESPACE"
+          echo "::notice title=External database configured::Testkube API uses the CNPG-generated application URI"
+          kubectl get deployments,statefulsets,pods,services -n "$TARGET_NAMESPACE"
+          echo "::endgroup::"
+
+      - name: Validate Testkube executions across the PostgreSQL upgrade
+        env:
+          CANDIDATE_TAG: ${{ needs.build-candidate.outputs.candidate }}
+          TEST_WORKFLOW_NAME: postman-workflow-smoke
+          TEST_WORKFLOW_URL: https://raw.githubusercontent.com/kubeshop/testkube/main/test/postman/crd-workflow/smoke.yaml
+        run: |
+          set -euo pipefail
+          port_forward_pid=""
+
+          cleanup() {
+            if [ -n "$port_forward_pid" ]; then
+              kill "$port_forward_pid" >/dev/null 2>&1 || true
+            fi
+          }
+
+          start_api_port_forward() {
+            kill "$port_forward_pid" >/dev/null 2>&1 || true
+            echo "Starting a local tunnel to the Testkube API"
+            kubectl -n "$TARGET_NAMESPACE" port-forward svc/testkube-api-server 8088:8088 >/tmp/testkube-port-forward.log 2>&1 &
+            port_forward_pid=$!
+            for attempt in $(seq 1 30); do
+              curl -fsS http://127.0.0.1:8088/health >/dev/null 2>&1 && break
+              sleep 1
+            done
+            curl -fsS http://127.0.0.1:8088/health >/dev/null
+          }
+          trap cleanup EXIT
+
+          # Apply OSS smoke workflow from testkube repo
+          curl -fsSL "$TEST_WORKFLOW_URL" | kubectl apply -n "$TARGET_NAMESPACE" -f -
+          kubectl get testworkflow "$TEST_WORKFLOW_NAME" -n "$TARGET_NAMESPACE"
+
+          # The API is ClusterIP-only, so the GitHub runner cannot reach it directly. Port-forward exposes it temporarily on localhost for Testkube CLI calls and is removed by cleanup.
+          echo "::group::Testkube API connectivity"
+          start_api_port_forward
+          echo "::notice title=Testkube API ready::Local tunnel established at http://127.0.0.1:8088"
+          echo "::endgroup::"
+
+          #  Run Testworkflow with the baseline PostgreSQL image.
+          echo "::group::Baseline TestWorkflow execution"
+          baseline_execution_id="$(testkube --client direct --api-uri http://127.0.0.1:8088 --namespace "$TARGET_NAMESPACE" --output go --go-template '{{.Id}}' run tw "$TEST_WORKFLOW_NAME" | tr -d '\r\n')"
+
+          echo "Started baseline execution: $baseline_execution_id"
+          testkube --client direct --api-uri http://127.0.0.1:8088 --namespace "$TARGET_NAMESPACE" watch twe "$baseline_execution_id"
+
+          IFS=, read -r baseline_id baseline_execution_number baseline_status <<< "$(testkube --client direct --api-uri http://127.0.0.1:8088 --namespace "$TARGET_NAMESPACE" --output go --go-template '{{.Id}},{{.Number}},{{.Result.Status}}' get twe "$baseline_execution_id" | tr -d '\r\n')"
+
+          test "$baseline_id" = "$baseline_execution_id"
+          test "$baseline_status" = passed
+          echo "Baseline execution passed: $baseline_execution_id (number $baseline_execution_number)"
+          echo "::notice title=Baseline execution stored::Execution ID: $baseline_execution_id"
+          echo "::endgroup::"
+
+          # Upgrade the same CloudNativePG Cluster and PVC to the candidate GAR image.
+          echo "::group::PostgreSQL candidate upgrade"
+          helm upgrade testkube-postgresql cloudnative-pg/cluster \
+            --version "$CNPG_CLUSTER_CHART_VERSION" \
+            --namespace "$TARGET_NAMESPACE" \
+            --reuse-values \
+            --set cluster.imageName='${{ secrets.GAR_LOCATION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID_PROD }}/testkube/postgresql:'"$CANDIDATE_TAG" \
+            --wait --timeout=15m
+          kubectl wait --namespace "$TARGET_NAMESPACE" \
+            --for=condition=Ready cluster.postgresql.cnpg.io/testkube-postgresql --timeout=15m
+
+          # Recreate the API database connection pool after the PostgreSQL pod replacement.
+          echo "::group::Restart Testkube API after PostgreSQL upgrade"
+          echo "Restarting Testkube API to establish fresh PostgreSQL connections"
+          kubectl rollout restart deployment/testkube-api-server -n "$TARGET_NAMESPACE"
+          kubectl rollout status deployment/testkube-api-server -n "$TARGET_NAMESPACE" --timeout=5m
+          # The previous port-forward targeted the restarted API pod; reconnect it to the replacement pod.
+          start_api_port_forward
+          echo "::notice title=Testkube API restarted::Connected to PostgreSQL through the replacement API pod"
+          echo "::endgroup::"
+
+          # Check if all components are running after the PostgreSQL upgrade
+          echo "Waiting for Testkube components to remain ready after the PostgreSQL restart"
+          for workload in $(kubectl get deployments -n "$TARGET_NAMESPACE" -o name); do
+            echo "Checking Deployment rollout: $workload"
+            kubectl rollout status "$workload" -n "$TARGET_NAMESPACE" --timeout=5m
+          done
+          for workload in $(kubectl get statefulsets -n "$TARGET_NAMESPACE" -o name); do
+            echo "Checking StatefulSet rollout: $workload"
+            kubectl rollout status "$workload" -n "$TARGET_NAMESPACE" --timeout=5m
+          done
+          not_ready_pods="$(kubectl -n "$TARGET_NAMESPACE" get pods -o json | jq -r '
+            .items[]
+            | select(.status.phase != "Succeeded" and .status.phase != "Failed")
+            | select(any(.status.conditions[]?; .type == "Ready" and .status == "True") | not)
+            | .metadata.name')"
+          if [ -n "$not_ready_pods" ]; then
+            echo "::error::Testkube pods are not Ready after the PostgreSQL upgrade: $not_ready_pods"
+            kubectl get pods -n "$TARGET_NAMESPACE" -o wide
+            exit 1
+          fi
+          echo "::notice title=PostgreSQL candidate ready::Image tag: $CANDIDATE_TAG"
+          echo "::notice title=Testkube components ready::All Testkube pods are Ready"
+          kubectl get cluster.postgresql.cnpg.io/testkube-postgresql -n "$TARGET_NAMESPACE"
+          kubectl get pods -n "$TARGET_NAMESPACE"
+
+          echo "::endgroup::"
+
+          # Read the original execution after the PostgreSQL restart to prove its data remains intact.
+          echo "::group::PostgreSQL persistence checks"
+          IFS=, read -r persisted_id persisted_number persisted_status <<< "$(testkube --client direct --api-uri http://127.0.0.1:8088 --namespace "$TARGET_NAMESPACE" --output go --go-template '{{.Id}},{{.Number}},{{.Result.Status}}' get twe "$baseline_execution_id" | tr -d '\r\n')"
+
+          test "$persisted_id" = "$baseline_execution_id"
+          echo "✓ Baseline execution ID is unchanged"
+          test "$persisted_number" = "$baseline_execution_number"
+          echo "✓ Baseline execution number is unchanged"
+          test "$persisted_status" = passed
+          echo "✓ Baseline execution status is still passed"
+
+          persisted_execution_ids="$(testkube --client direct --api-uri http://127.0.0.1:8088 --namespace "$TARGET_NAMESPACE" --output go --go-template '{{.Id}}{{"\n"}}' get twe --testworkflow "$TEST_WORKFLOW_NAME")"
+          if ! grep -Fxq "$baseline_execution_id" <<<"$persisted_execution_ids"; then
+            echo "::error::Baseline execution $baseline_execution_id was not returned when listing TestWorkflow executions"
+            echo "Execution IDs returned for $TEST_WORKFLOW_NAME:"
+            printf '%s\\n' "$persisted_execution_ids"
+            exit 1
+          fi
+          echo "✓ Baseline execution is readable with its original ID, number, and passed result"
+          echo "::notice title=PostgreSQL persistence passed::Baseline execution remains queryable"
+          echo "::endgroup::"
+
+          # Prove the upgraded PostgreSQL accepts and records a new Testkube execution.
+          echo "::group::Post-upgrade TestWorkflow execution"
+          post_upgrade_execution_id="$(testkube --client direct --api-uri http://127.0.0.1:8088 --namespace "$TARGET_NAMESPACE" --output go --go-template '{{.Id}}' run tw "$TEST_WORKFLOW_NAME" | tr -d '\r\n')"
+          echo "Started post-upgrade execution: $post_upgrade_execution_id"
+
+          testkube --client direct --api-uri http://127.0.0.1:8088 --namespace "$TARGET_NAMESPACE" watch twe "$post_upgrade_execution_id"
+
+          IFS=, read -r post_upgrade_id post_upgrade_number post_upgrade_status <<< "$(testkube --client direct --api-uri http://127.0.0.1:8088 --namespace "$TARGET_NAMESPACE" --output go --go-template '{{.Id}},{{.Number}},{{.Result.Status}}' get twe "$post_upgrade_execution_id" | tr -d '\r\n')"
+          test "$post_upgrade_id" = "$post_upgrade_execution_id"
+          test "$post_upgrade_status" = passed
+          test "$post_upgrade_number" -gt "$baseline_execution_number"
+          echo "✓ New execution is stored by the upgraded PostgreSQL"
+          echo "::notice title=Post-upgrade execution stored::Execution ID: $post_upgrade_execution_id"
+          echo "::endgroup::"
+
+      - name: Collect validation failure diagnostics
+        if: failure()
+        run: |
+          set +e
+          echo "::group::Pods"
+          kubectl -n "$TARGET_NAMESPACE" get pods -o wide
+          echo "::endgroup::"
+          echo "::group::Events"
+          kubectl -n "$TARGET_NAMESPACE" get events --sort-by=.lastTimestamp
+          echo "::endgroup::"
+          echo "::group::Testkube API logs"
+          kubectl -n "$TARGET_NAMESPACE" logs deployment/testkube-api-server --all-containers --tail=200
+          echo "::endgroup::"
+          echo "::group::CloudNativePG cluster"
+          kubectl -n "$TARGET_NAMESPACE" get cluster.postgresql.cnpg.io/testkube-postgresql
+          echo "::endgroup::"
+          echo "::group::PostgreSQL logs"
+          kubectl -n "$TARGET_NAMESPACE" logs -l cnpg.io/cluster=testkube-postgresql --all-containers --tail=200
+          echo "::endgroup::"
+          echo "::group::Testkube API port-forward"
+          test -f /tmp/testkube-port-forward.log && cat /tmp/testkube-port-forward.log
+          echo "::endgroup::"
+          echo "::endgroup::"
+
+      - name: Remove isolated OSS installation
+        if: always()
+        run: |
+          kubectl delete clusterrole "crd-reader-$TESTKUBE_RELEASE" "watchers-role-$TESTKUBE_RELEASE" --ignore-not-found
+          kubectl delete clusterrolebinding "crd-reader-$TESTKUBE_RELEASE" "watchers-rb-$TESTKUBE_RELEASE" --ignore-not-found
+          kubectl delete namespace "$TARGET_NAMESPACE" --ignore-not-found --wait=false
+
+  validate-enterprise:
+    needs: build-candidate
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      id-token: write
+    environment: dev
+    env:
+      BASELINE_TAG: ${{ needs.build-candidate.outputs.baseline }}
+      CANDIDATE_TAG: ${{ needs.build-candidate.outputs.candidate }}
+      LICENSE_KEY: ${{ secrets.LICENSE_KEY }}
+      POSTGRESQL_CLUSTER: testkube-enterprise-postgresql
+      TEST_WORKFLOW_NAME: postman-workflow-smoke
+      TEST_WORKFLOW_URL: https://raw.githubusercontent.com/kubeshop/testkube/main/test/postman/crd-workflow/smoke.yaml
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Authenticate to dev GKE using Federated Identity
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093
+        with:
+          workload_identity_provider: ${{ secrets.GKE_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GKE_SERVICE_ACCOUNT_EMAIL }}
+
+      - name: Configure dev GKE access
+        uses: google-github-actions/get-gke-credentials@v2
+        with:
+          cluster_name: ${{ secrets.DEV_GKE_CLUSTER_NAME }}
+          location: ${{ secrets.DEV_GKE_LOCATION }}
+          project_id: ${{ secrets.GKE_PROJECT }}
+
+      - name: Install Testkube CLI and Expect
+        run: |
+          VERSION="$(curl -fsSL https://api.github.com/repos/kubeshop/testkube/releases/latest | jq -r .tag_name)"
+          curl -fsSL "https://github.com/kubeshop/testkube/releases/download/${VERSION}/testkube_${VERSION#v}_Linux_x86_64.tar.gz" | tar -xz
+          sudo install kubectl-testkube /usr/local/bin/testkube
+          sudo apt-get update
+          sudo apt-get install -y expect
+          testkube disable telemetry
+
+      - name: Install Enterprise with baseline PostgreSQL
+        run: |
+          set -euo pipefail
+          TARGET_NAMESPACE="enterprise-postgresql-upgrade-pr-${{ github.event.pull_request.number || inputs.pr_number || github.run_id }}-${GITHUB_RUN_ATTEMPT}"
+          echo "TARGET_NAMESPACE=$TARGET_NAMESPACE" >> "$GITHUB_ENV"
+          kubectl create namespace "$TARGET_NAMESPACE"
+
+          registry='${{ secrets.GAR_LOCATION }}-docker.pkg.dev'
+          repository='${{ secrets.GCP_PROJECT_ID_PROD }}/testkube/postgresql'
+          echo "::group::Enterprise baseline PostgreSQL installation"
+          helm repo add cloudnative-pg https://cloudnative-pg.github.io/charts
+          helm repo update cloudnative-pg
+          helm upgrade --install "$POSTGRESQL_CLUSTER" cloudnative-pg/cluster \
+            --version "$CNPG_CLUSTER_CHART_VERSION" \
+            --namespace "$TARGET_NAMESPACE" \
+            --set fullnameOverride="$POSTGRESQL_CLUSTER" \
+            --set-string version.postgresql=18 \
+            --set cluster.instances=1 \
+            --set cluster.imageName="$registry/$repository:$BASELINE_TAG" \
+            --set cluster.postgresUID=999 \
+            --set cluster.postgresGID=999 \
+            --set cluster.storage.size=5Gi \
+            --set cluster.stopDelay=60 \
+            --set cluster.initdb.database=backend \
+            --set cluster.initdb.owner=testkube \
+            --wait --timeout=15m
+          kubectl wait --namespace "$TARGET_NAMESPACE" \
+            --for=condition=Ready cluster.postgresql.cnpg.io/"$POSTGRESQL_CLUSTER" --timeout=15m
+
+          # --- Install Enterprise without its bundled PostgreSQL and use CNPG's generated application URI ---
+          export TESTKUBE_INIT_COMMAND="testkube init demo --namespace $TARGET_NAMESPACE --no-confirm --license $LICENSE_KEY --helm-arg wait= --helm-arg timeout=15m --helm-set postgresql.enabled=false --helm-set global.postgres.enabled=true --helm-set global.postgres.dsnSecretRef=$POSTGRESQL_CLUSTER-app --helm-set global.postgres.dsnSecretKey=uri --helm-set testkube-cloud-api.api.postgres.enabled=true --helm-set testkube-cloud-api.api.postgres.dsnSecretRef=$POSTGRESQL_CLUSTER-app --helm-set testkube-cloud-api.api.postgres.dsnSecretKey=uri --helm-set testkube-worker-service.api.postgres.enabled=true --helm-set testkube-worker-service.api.postgres.dsnSecretRef=$POSTGRESQL_CLUSTER-app --helm-set testkube-worker-service.api.postgres.dsnSecretKey=uri --helm-set dex.rbac.createClusterScoped=false --verbose"
+          expect -c '
+            set timeout -1
+            spawn {*}$env(TESTKUBE_INIT_COMMAND)
+            expect "Do you want to continue?"
+            send "y"
+            expect "Do you want to open the dashboard?"
+            send "n"
+            expect eof
+            lassign [wait] pid spawnid os_error_flag exit_status
+            exit $exit_status
+          '
+          helm -n "$TARGET_NAMESPACE" status testkube
+          kubectl -n "$TARGET_NAMESPACE" get deployment/testkube-enterprise-api
+          echo "::notice title=Enterprise baseline ready::PostgreSQL image tag: $BASELINE_TAG"
+          echo "::endgroup::"
+
+      - name: Validate TestWorkflow executions across the Enterprise PostgreSQL upgrade
+        run: |
+          set -euo pipefail
+          port_forward_pids=()
+
+          cleanup() {
+            for pid in "${port_forward_pids[@]}"; do
+              kill "$pid" >/dev/null 2>&1 || true
+            done
+          }
+          trap cleanup EXIT
+
+          # --- Start a Kubernetes port-forward and wait until its local endpoint is reachable ---
+          echo "::group::Enterprise API readiness"
+          kubectl -n "$TARGET_NAMESPACE" rollout status deployment/testkube-enterprise-api --timeout=10m
+          echo "::endgroup::"
+
+          start_port_forward() {
+            local service="$1" port="$2" endpoint="$3" log_file="$4"
+            kubectl -n "$TARGET_NAMESPACE" port-forward "$service" "$port:$port" >"$log_file" 2>&1 &
+            port_forward_pids+=("$!")
+            for attempt in $(seq 1 30); do
+              curl -fsS "http://127.0.0.1:$port$endpoint" >/dev/null 2>&1 && return 0
+              sleep 1
+            done
+            curl -fsS "http://127.0.0.1:$port$endpoint" >/dev/null
+          }
+
+          authenticate_testkube_cli() {
+            local token_name="$1" id_token api_token
+            id_token="$(curl -fsS http://127.0.0.1:5556/token -d grant_type=password -d username=admin@example.com -d password=password -d 'scope=openid email groups offline_access' -d client_id=testkube-enterprise -d client_secret=QWkVzs3nct6HZM5hxsPzwaZtq | jq -er '.id_token')"
+            api_token="$(curl --fail-with-body -sS -X POST http://127.0.0.1:8088/organizations/tkcorg_demo/tokens -H "Authorization: Bearer $id_token" -H 'Content-Type: application/json' -d "{\"name\":\"$token_name\",\"scopes\":[{\"resource\":\"org\",\"identifier\":\"tkcorg_demo\",\"role\":\"admin\"},{\"resource\":\"env\",\"identifier\":\"tkcenv_my-first-environment\",\"role\":\"admin\"}]}" | jq -er '.token')"
+            testkube set context --namespace "$TARGET_NAMESPACE" --api-uri-override http://127.0.0.1:8088 --api-key "$api_token" --org-id tkcorg_demo --env-id tkcenv_my-first-environment
+          }
+
+          # --- Authenticate through Dex and configure the CLI for the Enterprise API ---
+          start_port_forward svc/testkube-enterprise-api 8088 /health /tmp/enterprise-api-port-forward.log
+          start_port_forward svc/testkube-enterprise-dex 5556 /keys /tmp/enterprise-dex-port-forward.log
+          authenticate_testkube_cli postgresql-upgrade-validation-baseline
+
+          # --- Create smoke TestWorkflows through the Testkube API ---
+          curl -fsSL "$TEST_WORKFLOW_URL" -o /tmp/smoke.yaml
+          awk 'BEGIN{n=0} /^---$/{n++; next} {print > ("/tmp/tw_" n ".yaml")}' /tmp/smoke.yaml
+          for workflow in /tmp/tw_*.yaml; do
+            testkube create testworkflow --update -f "$workflow"
+          done
+
+          # --- Run the TestWorkflows ---
+          echo "::group::Enterprise baseline TestWorkflow execution"
+          baseline_execution_id="$(testkube --output go --go-template '{{.Id}}' run tw "$TEST_WORKFLOW_NAME" | tr -d '\r\n')"
+          testkube watch twe "$baseline_execution_id"
+          IFS=, read -r baseline_id baseline_number baseline_status <<< "$(testkube --output go --go-template '{{.Id}},{{.Number}},{{.Result.Status}}' get twe "$baseline_execution_id" | tr -d '\r\n')"
+          test "$baseline_id" = "$baseline_execution_id"
+          test "$baseline_status" = passed
+          echo "Baseline execution passed: $baseline_execution_id (number $baseline_number)"
+          echo "::endgroup::"
+
+          # --- Enterprise PostgreSQL candidate upgrade ---
+          registry='${{ secrets.GAR_LOCATION }}-docker.pkg.dev'
+          repository='${{ secrets.GCP_PROJECT_ID_PROD }}/testkube/postgresql'
+          echo "::group::Enterprise PostgreSQL candidate upgrade"
+          helm upgrade "$POSTGRESQL_CLUSTER" cloudnative-pg/cluster \
+            --version "$CNPG_CLUSTER_CHART_VERSION" \
+            --namespace "$TARGET_NAMESPACE" \
+            --reuse-values \
+            --set cluster.imageName="$registry/$repository:$CANDIDATE_TAG" \
+            --wait --timeout=15m
+          kubectl wait --namespace "$TARGET_NAMESPACE" \
+            --for=condition=Ready cluster.postgresql.cnpg.io/"$POSTGRESQL_CLUSTER" --timeout=15m
+          for workload in $(kubectl -n "$TARGET_NAMESPACE" get deployments,statefulsets -o name); do
+            kubectl -n "$TARGET_NAMESPACE" rollout status "$workload" --timeout=5m
+          done
+          echo "::notice title=Enterprise PostgreSQL candidate ready::Image tag: $CANDIDATE_TAG"
+          echo "::endgroup::"
+
+          # --- Restart the API to recreate its PostgreSQL connection pool ---
+          echo "::group::Restart Enterprise API after PostgreSQL upgrade"
+          kubectl -n "$TARGET_NAMESPACE" rollout restart deployment/testkube-enterprise-api
+          kubectl -n "$TARGET_NAMESPACE" rollout status deployment/testkube-enterprise-api --timeout=5m
+
+          # --- The old tunnel points to the replaced API pod, so create a new one ---
+          kill "${port_forward_pids[0]}" >/dev/null 2>&1 || true
+          port_forward_pids[0]=""
+          start_port_forward svc/testkube-enterprise-api 8088 /health /tmp/enterprise-api-port-forward.log
+
+          # --- The restarted API must be used with a token issued after the database upgrade ---
+          authenticate_testkube_cli postgresql-upgrade-validation-post-upgrade
+          echo "::notice title=Enterprise API restarted::Connected with a fresh PostgreSQL connection and token"
+          echo "::endgroup::"
+
+          # --- Enterprise persistence checks ---
+          echo "::group::Enterprise PostgreSQL persistence checks"
+          # Read the baseline resources through the restarted API.
+          testkube --output go --go-template '{{.Name}}' get tw "$TEST_WORKFLOW_NAME" | grep -Fx "$TEST_WORKFLOW_NAME"
+          IFS=, read -r persisted_id persisted_number persisted_status <<< "$(testkube --output go --go-template '{{.Id}},{{.Number}},{{.Result.Status}}' get twe "$baseline_execution_id" | tr -d '\r\n')"
+          test "$persisted_id" = "$baseline_execution_id"
+          test "$persisted_number" = "$baseline_number"
+          test "$persisted_status" = passed
+          testkube --output go --go-template '{{.Id}}{{"\n"}}' get twe --testworkflow "$TEST_WORKFLOW_NAME" | grep -Fx "$baseline_execution_id"
+          echo "Baseline execution remains queryable"
+          echo "::endgroup::"
+
+          # --- Enterprise post-upgrade execution ---
+          echo "::group::Enterprise post-upgrade TestWorkflow execution"
+          post_upgrade_execution_id="$(testkube --output go --go-template '{{.Id}}' run tw "$TEST_WORKFLOW_NAME" | tr -d '\r\n')"
+          testkube watch twe "$post_upgrade_execution_id"
+          IFS=, read -r post_upgrade_id post_upgrade_number post_upgrade_status <<< "$(testkube --output go --go-template '{{.Id}},{{.Number}},{{.Result.Status}}' get twe "$post_upgrade_execution_id" | tr -d '\r\n')"
+          test "$post_upgrade_id" = "$post_upgrade_execution_id"
+          test "$post_upgrade_status" = passed
+          test "$post_upgrade_number" -gt "$baseline_number"
+          echo "Post-upgrade execution stored: $post_upgrade_execution_id"
+          echo "::endgroup::"
+
+      - name: Collect Enterprise validation failure diagnostics
+        if: failure()
+        run: |
+          echo "::group::Pods"
+          kubectl -n "$TARGET_NAMESPACE" get pods -o wide || true
+          echo "::endgroup::"
+          echo "::group::Warning events"
+          kubectl -n "$TARGET_NAMESPACE" get events --field-selector type=Warning --sort-by=.lastTimestamp || true
+          echo "::endgroup::"
+          echo "::group::Enterprise API logs"
+          kubectl -n "$TARGET_NAMESPACE" logs deployment/testkube-enterprise-api --all-containers --tail=100 || true
+          echo "::endgroup::"
+          echo "::group::Enterprise PostgreSQL logs"
+          kubectl -n "$TARGET_NAMESPACE" logs -l cnpg.io/cluster="$POSTGRESQL_CLUSTER" --all-containers --tail=100 || true
+          echo "::endgroup::"
+          echo "::endgroup::"
+
+      - name: Remove isolated Enterprise installation
+        if: always()
+        run: kubectl delete namespace "$TARGET_NAMESPACE" --ignore-not-found --wait=false

@@ -1,0 +1,471 @@
+name: MongoDB GAR Upgrade Validation
+
+on:
+  pull_request:
+    paths:
+      - mongodb/**
+  workflow_dispatch:
+    inputs:
+      baseline_ref:
+        description: Base branch or commit whose MongoDB version is the baseline
+        required: true
+        default: main
+        type: string
+      pr_number:
+        description: PR number used in the temporary GAR image tag
+        required: false
+        type: string
+
+concurrency:
+  group: mongodb-gar-upgrade-${{ github.event.pull_request.number || inputs.pr_number || github.run_id }}
+  cancel-in-progress: true
+
+env:
+  GAR_IMAGE: ${{ secrets.GAR_LOCATION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID_PROD }}/testkube/mongodb
+  DEV_GKE_CLUSTER_NAME: ${{ secrets.DEV_GKE_CLUSTER_NAME }}
+  DEV_GKE_LOCATION: ${{ secrets.DEV_GKE_LOCATION }}
+  GKE_PROJECT: ${{ secrets.GKE_PROJECT }}
+
+jobs:
+  build-candidate:
+    # Fork PRs cannot use the GAR or dev-GKE secrets.
+    if: github.event.pull_request.head.repo.full_name == github.repository || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      id-token: write
+    environment: dev
+    outputs:
+      baseline: ${{ steps.versions.outputs.baseline }}
+      candidate: ${{ steps.versions.outputs.candidate }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Resolve baseline and candidate tags
+        id: versions
+        run: |
+          BASE_REF="${{ github.event.pull_request.base.sha || inputs.baseline_ref || github.sha }}"
+          CANDIDATE_SHA="${{ github.event.pull_request.head.sha || github.sha }}"
+          BASELINE_TAG="$(git show "$BASE_REF:mongodb/helm/Chart.yaml" | awk -F'"' '/^appVersion:/ { print $2; exit }')"
+          CANDIDATE_VERSION="$(awk -F'"' '/^appVersion:/ { print $2; exit }' mongodb/helm/Chart.yaml)"
+          test -n "$BASELINE_TAG"
+          test -n "$CANDIDATE_VERSION"
+          CANDIDATE_TAG="${CANDIDATE_VERSION}-pr-${{ github.event.pull_request.number || inputs.pr_number || github.run_id }}-${CANDIDATE_SHA::7}"
+          echo "baseline=$BASELINE_TAG" >> "$GITHUB_OUTPUT"
+          echo "candidate=$CANDIDATE_TAG" >> "$GITHUB_OUTPUT"
+          echo "::notice title=MongoDB versions::Baseline: $BASELINE_TAG; candidate: $CANDIDATE_TAG"
+
+      - name: GAR login
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ secrets.GAR_LOCATION }}-docker.pkg.dev
+          username: _json_key
+          password: ${{ secrets.GKE_SA_KEY_PROD }}
+
+      - name: Build and publish immutable candidate image to GAR
+        uses: docker/build-push-action@v6
+        with:
+          context: mongodb
+          file: mongodb/mongo-8.dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ${{ env.GAR_IMAGE }}:${{ steps.versions.outputs.candidate }}
+
+  validate-oss:
+    needs: build-candidate
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      id-token: write
+    environment: dev
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Authenticate to dev GKE using Federated Identity
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093
+        with:
+          workload_identity_provider: ${{ secrets.GKE_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GKE_SERVICE_ACCOUNT_EMAIL }}
+
+      - name: Configure dev GKE access
+        uses: google-github-actions/get-gke-credentials@v2
+        with:
+          cluster_name: ${{ secrets.DEV_GKE_CLUSTER_NAME }}
+          location: ${{ secrets.DEV_GKE_LOCATION }}
+          project_id: ${{ secrets.GKE_PROJECT }}
+
+      - name: Install Testkube CLI
+        run: |
+          VERSION="$(curl -fsSL https://api.github.com/repos/kubeshop/testkube/releases/latest | jq -r .tag_name)"
+          curl -fsSL "https://github.com/kubeshop/testkube/releases/download/${VERSION}/testkube_${VERSION#v}_Linux_x86_64.tar.gz" | tar -xz
+          sudo install kubectl-testkube /usr/local/bin/testkube
+          testkube disable telemetry
+
+      - name: Provision isolated OSS installation
+        env:
+          BASELINE_TAG: ${{ needs.build-candidate.outputs.baseline }}
+        run: |
+          TARGET_NAMESPACE="oss-mongodb-upgrade-pr-${{ github.event.pull_request.number || github.run_id }}-${GITHUB_RUN_ATTEMPT}"
+          TESTKUBE_RELEASE="oss-mongodb-validation-${{ github.event.pull_request.number || github.run_id }}-${GITHUB_RUN_ATTEMPT}"
+          echo "TARGET_NAMESPACE=$TARGET_NAMESPACE" >> "$GITHUB_ENV"
+          echo "TESTKUBE_RELEASE=$TESTKUBE_RELEASE" >> "$GITHUB_ENV"
+          # --- Keep this run isolated so cleanup cannot affect a shared Testkube installation ---
+          kubectl create namespace "$TARGET_NAMESPACE"
+          helm dependency build mongodb/helm
+
+          # --- Start the external MongoDB service on the current production image ---
+          helm upgrade --install testkube-mongodb mongodb/helm \
+            --namespace "$TARGET_NAMESPACE" \
+            --set image.registry='${{ secrets.GAR_LOCATION }}-docker.pkg.dev' \
+            --set image.repository='${{ secrets.GCP_PROJECT_ID_PROD }}/testkube/mongodb' \
+            --set image.tag="$BASELINE_TAG" \
+            --set image.pullPolicy=IfNotPresent \
+            --set updateStrategy.type=Recreate \
+            --set auth.enabled=false \
+            --wait --timeout=15m
+
+          # --- Install OSS without its bundled MongoDB and connect the API to the external service above ---
+          testkube init standalone-agent --name "$TESTKUBE_RELEASE" --namespace "$TARGET_NAMESPACE" --no-confirm --no-mongo --helm-set testkube-api.mongodb.enabled=true --helm-set testkube-api.mongodb.dsn='mongodb://testkube-mongodb:27017' --helm-set testkube-api.minio.podSecurityContext.fsGroup=1001 --helm-set testkube-operator.installCRD=false --helm-arg wait= --helm-arg timeout=15m
+
+          kubectl rollout status deployment/testkube-api-server -n "$TARGET_NAMESPACE" --timeout=15m
+          echo "::notice title=Testkube OSS ready::Namespace: $TARGET_NAMESPACE"
+          kubectl get deployments,pods,services -n "$TARGET_NAMESPACE"
+
+      - name: Validate an existing Testkube workflow across the MongoDB upgrade
+        env:
+          BASELINE_TAG: ${{ needs.build-candidate.outputs.baseline }}
+          CANDIDATE_TAG: ${{ needs.build-candidate.outputs.candidate }}
+          TEST_WORKFLOW_NAME: postman-workflow-smoke
+          TEST_WORKFLOW_URL: https://raw.githubusercontent.com/kubeshop/testkube/main/test/postman/crd-workflow/smoke.yaml
+        run: |
+          set -euo pipefail
+          port_forward_pid=""
+
+          cleanup() {
+            if [ -n "$port_forward_pid" ]; then
+              kill "$port_forward_pid" >/dev/null 2>&1 || true
+            fi
+          }
+
+          trap cleanup EXIT
+
+          # --- Apply OSS smoke workflow from testkube repo ---
+          curl -fsSL "$TEST_WORKFLOW_URL" | kubectl apply -n "$TARGET_NAMESPACE" -f -
+          kubectl get testworkflow "$TEST_WORKFLOW_NAME" -n "$TARGET_NAMESPACE"
+
+          # --- The API is ClusterIP-only, so the GitHub runner cannot reach it directly. Port-forward exposes it temporarily on localhost for Testkube CLI calls and is removed by cleanup ---
+          echo "::group::Testkube API connectivity"
+          echo "Starting a local tunnel to the Testkube API"
+          kubectl -n "$TARGET_NAMESPACE" port-forward svc/testkube-api-server 8088:8088 >/tmp/testkube-port-forward.log 2>&1 &
+          port_forward_pid=$!
+          for attempt in $(seq 1 30); do
+            curl -fsS http://127.0.0.1:8088/health >/dev/null 2>&1 && break
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:8088/health >/dev/null
+          echo "::notice title=Testkube API ready::Local tunnel established at http://127.0.0.1:8088"
+          echo "::endgroup::"
+
+          # --- Run Testworkflow with the baseline MongoDB image ---
+          echo "::group::Baseline TestWorkflow execution"
+          baseline_execution_id="$(testkube --client direct --api-uri http://127.0.0.1:8088 --namespace "$TARGET_NAMESPACE" --output go --go-template '{{.Id}}' run tw "$TEST_WORKFLOW_NAME" | tr -d '\r\n')"
+          echo "Started baseline execution: $baseline_execution_id"
+          testkube --client direct --api-uri http://127.0.0.1:8088 --namespace "$TARGET_NAMESPACE" watch twe "$baseline_execution_id"
+          echo "::notice title=Baseline execution passed::Execution ID: $baseline_execution_id"
+          echo "::endgroup::"
+
+          # --- Upgrade only the external MongoDB image ---
+          echo "::group::MongoDB candidate upgrade"
+          helm dependency build mongodb/helm
+          helm upgrade testkube-mongodb mongodb/helm \
+            --namespace "$TARGET_NAMESPACE" \
+            --reuse-values \
+            --set image.registry='${{ secrets.GAR_LOCATION }}-docker.pkg.dev' \
+            --set image.repository='${{ secrets.GCP_PROJECT_ID_PROD }}/testkube/mongodb' \
+            --set image.tag="$CANDIDATE_TAG" \
+            --set image.pullPolicy=IfNotPresent \
+            --set updateStrategy.type=Recreate \
+            --wait --timeout=15m
+          kubectl rollout status deployment/testkube-mongodb -n "$TARGET_NAMESPACE" --timeout=15m
+
+          # --- Check if all components are running after the MongoDB upgrade ---
+          echo "Waiting for Testkube components to remain ready after the MongoDB restart"
+          for workload in $(kubectl get deployments -n "$TARGET_NAMESPACE" -o name); do
+            kubectl rollout status "$workload" -n "$TARGET_NAMESPACE" --timeout=5m
+          done
+          for workload in $(kubectl get statefulsets -n "$TARGET_NAMESPACE" -o name); do
+            kubectl rollout status "$workload" -n "$TARGET_NAMESPACE" --timeout=5m
+          done
+          not_ready_pods="$(kubectl -n "$TARGET_NAMESPACE" get pods -o json | jq -r '
+            .items[]
+            | select(.status.phase != "Succeeded" and .status.phase != "Failed")
+            | select(any(.status.conditions[]?; .type == "Ready" and .status == "True") | not)
+            | .metadata.name')"
+          if [ -n "$not_ready_pods" ]; then
+            echo "::error::Testkube pods are not Ready after the MongoDB upgrade: $not_ready_pods"
+            kubectl get pods -n "$TARGET_NAMESPACE" -o wide
+            exit 1
+          fi
+          echo "::notice title=MongoDB candidate ready::Image tag: $CANDIDATE_TAG"
+          echo "::notice title=Testkube components ready::All Testkube pods are Ready"
+          kubectl get deployment/testkube-mongodb -n "$TARGET_NAMESPACE"
+          kubectl get pods -n "$TARGET_NAMESPACE"
+          echo "::endgroup::"
+
+          # --- Check if MongoDB retains the workflow definition and its execution from pre-upgrade apply ---
+          echo "::group::MongoDB persistence checks"
+          testkube --client direct --api-uri http://127.0.0.1:8088 --namespace "$TARGET_NAMESPACE" --output go --go-template '{{.Name}}' get tw "$TEST_WORKFLOW_NAME" | grep -Fx "$TEST_WORKFLOW_NAME"
+          echo "✓ Persisted TestWorkflow is available"
+          testkube --client direct --api-uri http://127.0.0.1:8088 --namespace "$TARGET_NAMESPACE" --output go --go-template '{{.Id}}{{"\n"}}' get twe --testworkflow "$TEST_WORKFLOW_NAME" | grep -Fx "$baseline_execution_id"
+          echo "✓ Baseline execution is still listed"
+
+          IFS=, read -r persisted_id persisted_status <<< "$(testkube --client direct --api-uri http://127.0.0.1:8088 --namespace "$TARGET_NAMESPACE" --output go --go-template '{{.Id}},{{.Result.Status}}' get twe "$baseline_execution_id" | tr -d '\r\n')"
+          test "$persisted_id" = "$baseline_execution_id"
+          test "$persisted_status" = passed
+          echo "::notice title=MongoDB persistence passed::Baseline execution is still passed"
+          echo "::endgroup::"
+
+          # --- Prove the upgraded MongoDB also accepts and records a new execution ---
+          echo "::group::Post-upgrade TestWorkflow execution"
+          post_upgrade_execution_id="$(testkube --client direct --api-uri http://127.0.0.1:8088 --namespace "$TARGET_NAMESPACE" --output go --go-template '{{.Id}}' run tw "$TEST_WORKFLOW_NAME" | tr -d '\r\n')"
+          echo "Started post-upgrade execution: $post_upgrade_execution_id"
+          testkube --client direct --api-uri http://127.0.0.1:8088 --namespace "$TARGET_NAMESPACE" watch twe "$post_upgrade_execution_id"
+          echo "::notice title=Post-upgrade execution passed::Execution ID: $post_upgrade_execution_id"
+          echo "::endgroup::"
+
+      - name: Collect validation failure diagnostics
+        if: failure()
+        run: |
+          set +e
+          echo "::group::Pods"
+          kubectl -n "$TARGET_NAMESPACE" get pods -o wide
+          echo "::endgroup::"
+          echo "::group::Warning events"
+          kubectl -n "$TARGET_NAMESPACE" get events --field-selector type=Warning --sort-by=.lastTimestamp
+          echo "::endgroup::"
+          echo "::group::Testkube API logs"
+          kubectl -n "$TARGET_NAMESPACE" logs deployment/testkube-api-server --all-containers --tail=100
+          echo "::endgroup::"
+          echo "::group::MongoDB logs"
+          kubectl -n "$TARGET_NAMESPACE" logs deployment/testkube-mongodb --all-containers --tail=100
+          echo "::endgroup::"
+          echo "::endgroup::"
+
+      - name: Remove isolated OSS installation
+        if: always()
+        run: |
+          kubectl delete clusterrole "crd-reader-$TESTKUBE_RELEASE" "watchers-role-$TESTKUBE_RELEASE" --ignore-not-found
+          kubectl delete clusterrolebinding "crd-reader-$TESTKUBE_RELEASE" "watchers-rb-$TESTKUBE_RELEASE" --ignore-not-found
+          kubectl delete namespace "$TARGET_NAMESPACE" --ignore-not-found --wait=false
+
+  validate-enterprise:
+    needs: build-candidate
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      id-token: write
+    environment: dev
+    env:
+      BASELINE_TAG: ${{ needs.build-candidate.outputs.baseline }}
+      CANDIDATE_TAG: ${{ needs.build-candidate.outputs.candidate }}
+      LICENSE_KEY: ${{ secrets.LICENSE_KEY }}
+      MONGODB_RELEASE: testkube-mongodb
+      MONGODB_CHART: mongodb/helm
+      MONGODB_DSN: mongodb://testkube-mongodb:27017
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Authenticate to dev GKE using Federated Identity
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093
+        with:
+          workload_identity_provider: ${{ secrets.GKE_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GKE_SERVICE_ACCOUNT_EMAIL }}
+
+      - name: Configure dev GKE access
+        uses: google-github-actions/get-gke-credentials@v2
+        with:
+          cluster_name: ${{ secrets.DEV_GKE_CLUSTER_NAME }}
+          location: ${{ secrets.DEV_GKE_LOCATION }}
+          project_id: ${{ secrets.GKE_PROJECT }}
+
+      - name: Install Testkube CLI and Expect
+        run: |
+          VERSION="$(curl -fsSL https://api.github.com/repos/kubeshop/testkube/releases/latest | jq -r .tag_name)"
+          curl -fsSL "https://github.com/kubeshop/testkube/releases/download/${VERSION}/testkube_${VERSION#v}_Linux_x86_64.tar.gz" | tar -xz
+          sudo install kubectl-testkube /usr/local/bin/testkube
+          sudo apt-get update
+          sudo apt-get install -y expect
+          testkube disable telemetry
+
+      - name: Install Enterprise with baseline MongoDB
+        run: |
+          set -euo pipefail
+          TARGET_NAMESPACE="enterprise-mongodb-upgrade-pr-${{ github.event.pull_request.number || inputs.pr_number || github.run_id }}-${GITHUB_RUN_ATTEMPT}"
+          echo "TARGET_NAMESPACE=$TARGET_NAMESPACE" >> "$GITHUB_ENV"
+          kubectl create namespace "$TARGET_NAMESPACE"
+
+          registry='${{ secrets.GAR_LOCATION }}-docker.pkg.dev'
+          repository='${{ secrets.GCP_PROJECT_ID_PROD }}/testkube/mongodb'
+          echo "::group::Enterprise baseline MongoDB"
+
+          # --- Deploy MongoDB independently so its upgrade is isolated from Testkube ---
+          helm dependency build "$MONGODB_CHART"
+          helm upgrade --install "$MONGODB_RELEASE" "$MONGODB_CHART" \
+            --namespace "$TARGET_NAMESPACE" \
+            --set image.registry="$registry" \
+            --set image.repository="$repository" \
+            --set image.tag="$BASELINE_TAG" \
+            --set image.pullPolicy=IfNotPresent \
+            --set updateStrategy.type=Recreate \
+            --set auth.enabled=false \
+            --wait --timeout=15m
+          echo "::endgroup::"
+
+          echo "::group::Enterprise Testkube installation"
+          # --- Disable the bundled MongoDB and connect Enterprise to the external service ---
+          export TESTKUBE_INIT_COMMAND="testkube init demo --namespace $TARGET_NAMESPACE --no-confirm --license $LICENSE_KEY --helm-arg wait= --helm-arg timeout=15m --helm-set dex.rbac.createClusterScoped=false --helm-set testkube-ai-service.enabled=false --helm-set mongodb.enabled=false --helm-set postgresql.enabled=false --helm-set global.postgres.enabled=false --helm-set testkube-cloud-api.api.postgres.enabled=false --helm-set testkube-worker-service.api.postgres.enabled=false --helm-set global.mongo.enabled=true --helm-set global.mongo.dsn=$MONGODB_DSN --helm-set testkube-cloud-api.api.mongo.enabled=true --helm-set testkube-cloud-api.api.mongo.dsn=$MONGODB_DSN --helm-set testkube-worker-service.api.mongo.enabled=true --helm-set testkube-worker-service.api.mongo.dsn=$MONGODB_DSN --verbose"
+
+          expect -c '
+            set timeout 300
+            spawn {*}$env(TESTKUBE_INIT_COMMAND)
+            expect "Do you want to continue?"
+            send "y"
+            expect "Do you want to open the dashboard?"
+            send "n"
+            expect eof
+            lassign [wait] pid spawnid os_error_flag exit_status
+            exit $exit_status
+          '
+
+          helm -n "$TARGET_NAMESPACE" status testkube
+          kubectl -n "$TARGET_NAMESPACE" get deployment/testkube-enterprise-api
+          echo "::endgroup::"
+
+      - name: Validate TestWorkflow data across the Enterprise MongoDB upgrade
+        run: |
+          set -euo pipefail
+          port_forward_pids=()
+
+          cleanup() {
+            for pid in "${port_forward_pids[@]}"; do
+              kill "$pid" >/dev/null 2>&1 || true
+            done
+          }
+          trap cleanup EXIT
+
+          # --- Start a Kubernetes port-forward and wait until its local endpoint is reachable ---
+          echo "::group::Enterprise API readiness"
+          kubectl -n "$TARGET_NAMESPACE" rollout status deployment/testkube-enterprise-api --timeout=10m
+          echo "::endgroup::"
+
+          start_port_forward() {
+            local service="$1" port="$2" endpoint="$3" log_file="$4"
+            kubectl -n "$TARGET_NAMESPACE" port-forward "$service" "$port:$port" >"$log_file" 2>&1 &
+            port_forward_pids+=("$!")
+            for attempt in $(seq 1 30); do
+              curl -fsS "http://127.0.0.1:$port$endpoint" >/dev/null 2>&1 && return 0
+              sleep 1
+            done
+            curl -fsS "http://127.0.0.1:$port$endpoint" >/dev/null
+          }
+
+          # --- Authenticate through Dex and use the Testkube CLI against the Enterprise API ---
+          start_port_forward svc/testkube-enterprise-api 8088 /health /tmp/enterprise-api-port-forward.log
+          start_port_forward svc/testkube-enterprise-dex 5556 /keys /tmp/enterprise-dex-port-forward.log
+          id_token="$(curl -fsS http://127.0.0.1:5556/token -d grant_type=password -d username=admin@example.com -d password=password -d 'scope=openid email groups offline_access' -d client_id=testkube-enterprise -d client_secret=QWkVzs3nct6HZM5hxsPzwaZtq | jq -er '.id_token')"
+          api_token="$(curl -fsS -X POST http://127.0.0.1:8088/organizations/tkcorg_demo/tokens -H "Authorization: Bearer $id_token" -H 'Content-Type: application/json' -d '{"name":"mongodb-upgrade-validation","scopes":[{"resource":"org","identifier":"tkcorg_demo","role":"admin"},{"resource":"env","identifier":"tkcenv_my-first-environment","role":"admin"}]}' | jq -er '.token')"
+          testkube set context --namespace "$TARGET_NAMESPACE" --api-uri-override http://127.0.0.1:8088 --api-key "$api_token" --org-id tkcorg_demo --env-id tkcenv_my-first-environment
+
+          # --- Create smoke TestWorkflows from testkube repo ---
+          workflow_name=postman-workflow-smoke
+          curl -fsSL https://raw.githubusercontent.com/kubeshop/testkube/main/test/postman/crd-workflow/smoke.yaml -o /tmp/smoke.yaml
+          awk 'BEGIN{n=0} /^---$/{n++; next} {print > ("/tmp/tw_" n ".yaml")}' /tmp/smoke.yaml
+          for workflow in /tmp/tw_*.yaml; do
+            testkube create testworkflow --update -f "$workflow"
+          done
+
+          # --- Run the TestWorkflows ---
+          echo "::group::Enterprise baseline TestWorkflow execution"
+          baseline_execution_id="$(testkube --output go --go-template '{{.Id}}' run tw "$workflow_name" | tr -d '\r\n')"
+          testkube watch twe "$baseline_execution_id"
+          echo "Baseline execution passed: $baseline_execution_id"
+          echo "::endgroup::"
+
+          # --- Upgrade only the MongoDB release ---
+          echo "::group::Enterprise MongoDB candidate upgrade"
+          registry='${{ secrets.GAR_LOCATION }}-docker.pkg.dev'
+          repository='${{ secrets.GCP_PROJECT_ID_PROD }}/testkube/mongodb'
+          helm upgrade --install "$MONGODB_RELEASE" "$MONGODB_CHART" \
+            --namespace "$TARGET_NAMESPACE" \
+            --set image.registry="$registry" \
+            --set image.repository="$repository" \
+            --set image.tag="$CANDIDATE_TAG" \
+            --set image.pullPolicy=IfNotPresent \
+            --set updateStrategy.type=Recreate \
+            --set auth.enabled=false \
+            --wait --timeout=15m
+
+          # --- Check if MongoDB pod is running ---
+          kubectl -n "$TARGET_NAMESPACE" rollout status deployment/$MONGODB_RELEASE --timeout=15m
+          for workload in $(kubectl -n "$TARGET_NAMESPACE" get deployments,statefulsets -o name); do
+            kubectl -n "$TARGET_NAMESPACE" rollout status "$workload" --timeout=5m
+          done
+
+          # --- Check if API and Worker service can reconnect to the new MongoDB pod ---
+          echo "::group::Enterprise MongoDB client checks"
+          curl -fsS http://127.0.0.1:8088/health/readiness >/dev/null
+          for deployment in testkube-enterprise-api testkube-enterprise-worker-service; do
+            kubectl -n "$TARGET_NAMESPACE" rollout status deployment/"$deployment" --timeout=5m
+            kubectl -n "$TARGET_NAMESPACE" get deployment "$deployment" -o json | \
+              jq -e --arg dsn "$MONGODB_DSN" 'any(.spec.template.spec.containers[]?.env[]?; .name == "API_MONGO_DSN" and .value == $dsn)' >/dev/null
+            echo "✓ $deployment is Ready and configured for the external MongoDB"
+          done
+          echo "::endgroup::"
+          echo "::endgroup::"
+
+          # --- Check if MongoDB retains the workflow definition and its execution from pre-upgrade apply ---
+          echo "::group::Enterprise MongoDB persistence checks"
+          testkube --output go --go-template '{{.Name}}' get tw "$workflow_name" | grep -Fx "$workflow_name"
+          IFS=, read -r persisted_id persisted_status <<< "$(testkube --output go --go-template '{{.Id}},{{.Result.Status}}' get twe "$baseline_execution_id" | tr -d '\r\n')"
+          test "$persisted_id" = "$baseline_execution_id"
+          test "$persisted_status" = passed
+          echo "Baseline workflow and execution are retained"
+
+           # --- Prove the upgraded MongoDB also accepts and records a new execution ---
+          echo "::group::Post-upgrade TestWorkflow execution"
+          post_upgrade_execution_id="$(testkube --output go --go-template '{{.Id}}' run tw "$workflow_name" | tr -d '\r\n')"
+          echo "Started post-upgrade execution: $post_upgrade_execution_id"
+          testkube watch twe "$post_upgrade_execution_id"
+          echo "Post-upgrade execution passed: $post_upgrade_execution_id"
+          echo "::endgroup::"
+
+      - name: Collect Enterprise validation failure diagnostics
+        if: failure()
+        run: |
+          echo "::group::Pods"
+          kubectl -n "$TARGET_NAMESPACE" get pods -o wide || true
+          echo "::endgroup::"
+          echo "::group::Warning events"
+          kubectl -n "$TARGET_NAMESPACE" get events --field-selector type=Warning --sort-by=.lastTimestamp || true
+          echo "::endgroup::"
+          echo "::group::Enterprise API logs"
+          kubectl -n "$TARGET_NAMESPACE" logs deployment/testkube-enterprise-api --all-containers --tail=100 || true
+          echo "::endgroup::"
+          echo "::group::MongoDB logs"
+          kubectl -n "$TARGET_NAMESPACE" logs deployment/$MONGODB_RELEASE --all-containers --tail=100 || true
+          echo "::endgroup::"
+          echo "::endgroup::"
+
+      - name: Remove isolated Enterprise installation
+        if: always()
+        run: kubectl delete namespace "$TARGET_NAMESPACE" --ignore-not-found --wait=false

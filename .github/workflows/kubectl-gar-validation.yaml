@@ -1,0 +1,241 @@
+name: Kubectl GAR Upgrade Validation
+
+on:
+  pull_request:
+    paths:
+      - kubectl/**
+  workflow_dispatch:
+    inputs:
+      baseline_ref:
+        description: Base branch or commit whose kubectl version is the baseline
+        required: true
+        default: main
+        type: string
+      pr_number:
+        description: PR number used in the temporary GAR image tag
+        required: false
+        type: string
+
+concurrency:
+  group: kubectl-gar-validation-${{ github.event.pull_request.number || inputs.pr_number || github.run_id }}
+  cancel-in-progress: true
+
+env:
+  GAR_IMAGE: ${{ secrets.GAR_LOCATION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID_PROD }}/testkube/kubectl
+  DEV_GKE_CLUSTER_NAME: ${{ secrets.DEV_GKE_CLUSTER_NAME }}
+  DEV_GKE_LOCATION: ${{ secrets.DEV_GKE_LOCATION }}
+  GKE_PROJECT: ${{ secrets.GKE_PROJECT }}
+
+jobs:
+  build-candidate:
+    if: github.event.pull_request.head.repo.full_name == github.repository || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      id-token: write
+    environment: dev
+    outputs:
+      baseline: ${{ steps.versions.outputs.baseline }}
+      candidate: ${{ steps.versions.outputs.candidate }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Resolve baseline and candidate tags
+        id: versions
+        run: |
+          BASE_REF="${{ github.event.pull_request.base.sha || inputs.baseline_ref || github.sha }}"
+          CANDIDATE_SHA="${{ github.event.pull_request.head.sha || github.sha }}"
+          BASELINE_TAG="$(git show "$BASE_REF:kubectl/helm/Chart.yaml" | awk -F'"' '/^appVersion:/ { print $2; exit }')"
+          CANDIDATE_VERSION="$(awk -F'"' '/^appVersion:/ { print $2; exit }' kubectl/helm/Chart.yaml)"
+          test -n "$BASELINE_TAG"
+          test -n "$CANDIDATE_VERSION"
+          CANDIDATE_TAG="${CANDIDATE_VERSION}-pr-${{ github.event.pull_request.number || inputs.pr_number || github.run_id }}-${CANDIDATE_SHA::7}"
+          echo "baseline=$BASELINE_TAG" >> "$GITHUB_OUTPUT"
+          echo "candidate=$CANDIDATE_TAG" >> "$GITHUB_OUTPUT"
+          echo "::notice title=Kubectl versions::Baseline: $BASELINE_TAG; candidate: $CANDIDATE_TAG"
+
+      - name: GAR login
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ secrets.GAR_LOCATION }}-docker.pkg.dev
+          username: _json_key
+          password: ${{ secrets.GKE_SA_KEY_PROD }}
+
+      - name: Build and publish immutable candidate image to GAR
+        uses: docker/build-push-action@v6
+        with:
+          context: kubectl
+          file: kubectl/kubectl-release.dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ${{ env.GAR_IMAGE }}:${{ steps.versions.outputs.candidate }}
+
+  validate-oss:
+    needs: build-candidate
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      id-token: write
+    environment: dev
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Authenticate to dev GKE using Federated Identity
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093
+        with:
+          workload_identity_provider: ${{ secrets.GKE_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GKE_SERVICE_ACCOUNT_EMAIL }}
+
+      - name: Configure dev GKE access
+        uses: google-github-actions/get-gke-credentials@v2
+        with:
+          cluster_name: ${{ secrets.DEV_GKE_CLUSTER_NAME }}
+          location: ${{ secrets.DEV_GKE_LOCATION }}
+          project_id: ${{ secrets.GKE_PROJECT }}
+
+      - name: Install Testkube CLI
+        run: |
+          VERSION="$(curl -fsSL https://api.github.com/repos/kubeshop/testkube/releases/latest | jq -r .tag_name)"
+          curl -fsSL "https://github.com/kubeshop/testkube/releases/download/${VERSION}/testkube_${VERSION#v}_Linux_x86_64.tar.gz" | tar -xz
+          sudo install kubectl-testkube /usr/local/bin/testkube
+          testkube disable telemetry
+
+      - name: Install OSS with the candidate kubectl image
+        env:
+          CANDIDATE_TAG: ${{ needs.build-candidate.outputs.candidate }}
+        run: |
+          TARGET_NAMESPACE="kubectl-oss-pr-${{ github.event.pull_request.number || github.run_id }}-${GITHUB_RUN_ATTEMPT}"
+          TESTKUBE_RELEASE="kubectl-oss-${{ github.event.pull_request.number || github.run_id }}-${GITHUB_RUN_ATTEMPT}"
+          echo "TARGET_NAMESPACE=$TARGET_NAMESPACE" >> "$GITHUB_ENV"
+          echo "TESTKUBE_RELEASE=$TESTKUBE_RELEASE" >> "$GITHUB_ENV"
+
+          echo "::group::Install OSS with candidate kubectl image"
+          kubectl create namespace "$TARGET_NAMESPACE"
+          testkube init standalone-agent \
+            --name "$TESTKUBE_RELEASE" \
+            --namespace "$TARGET_NAMESPACE" \
+            --no-confirm \
+            --helm-set global.testWorkflows.builtinTemplatesInstaller.image.registry='${{ secrets.GAR_LOCATION }}-docker.pkg.dev' \
+            --helm-set global.testWorkflows.builtinTemplatesInstaller.image.repository='${{ secrets.GCP_PROJECT_ID_PROD }}/testkube/kubectl' \
+            --helm-set global.testWorkflows.builtinTemplatesInstaller.image.tag="$CANDIDATE_TAG" \
+            --helm-set testkube-api.minio.podSecurityContext.fsGroup=1001 \
+            --helm-set testkube-operator.installCRD=false \
+            --helm-arg wait= \
+            --helm-arg timeout=15m
+          kubectl rollout status deployment/testkube-api-server -n "$TARGET_NAMESPACE" --timeout=15m
+          echo "::notice title=OSS candidate validated::The Helm template-installer hook completed with image tag $CANDIDATE_TAG"
+          echo "::endgroup::"
+
+      - name: Verify OSS built-in template installer result
+        run: |
+          echo "::group::Verify OSS kubectl hook result"
+          kubectl -n "$TARGET_NAMESPACE" get testworkflowtemplate serviceaccount--fullaccess
+          echo "::notice title=OSS hook passed::The candidate kubectl image applied the built-in TestWorkflowTemplate"
+          echo "::endgroup::"
+
+      - name: Collect OSS failure diagnostics
+        if: failure()
+        run: |
+          echo "::group::OSS kubectl validation failure diagnostics"
+          echo "::group::Pods, jobs, and events"
+          kubectl -n "$TARGET_NAMESPACE" get pods,jobs,events --sort-by=.lastTimestamp || true
+          echo "::endgroup::"
+          echo "::group::Testkube API logs"
+          kubectl -n "$TARGET_NAMESPACE" logs -l app.kubernetes.io/name=testkube-api --all-containers --tail=200 || true
+          echo "::endgroup::"
+          echo "::endgroup::"
+
+      - name: Remove isolated OSS installation
+        if: always()
+        run: |
+          kubectl delete clusterrole "crd-reader-$TESTKUBE_RELEASE" "watchers-role-$TESTKUBE_RELEASE" --ignore-not-found
+          kubectl delete clusterrolebinding "crd-reader-$TESTKUBE_RELEASE" "watchers-rb-$TESTKUBE_RELEASE" --ignore-not-found
+          kubectl delete namespace "$TARGET_NAMESPACE" --ignore-not-found --wait=false
+
+  validate-enterprise-secret-generator:
+    needs: build-candidate
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      id-token: write
+    environment: dev
+    env:
+      LICENSE_KEY: ${{ secrets.LICENSE_KEY }}
+    steps:
+      - name: Authenticate to dev GKE using Federated Identity
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093
+        with:
+          workload_identity_provider: ${{ secrets.GKE_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GKE_SERVICE_ACCOUNT_EMAIL }}
+
+      - name: Configure dev GKE access
+        uses: google-github-actions/get-gke-credentials@v2
+        with:
+          cluster_name: ${{ secrets.DEV_GKE_CLUSTER_NAME }}
+          location: ${{ secrets.DEV_GKE_LOCATION }}
+          project_id: ${{ secrets.GKE_PROJECT }}
+
+      - name: Install Testkube CLI
+        run: |
+          VERSION="$(curl -fsSL https://api.github.com/repos/kubeshop/testkube/releases/latest | jq -r .tag_name)"
+          curl -fsSL "https://github.com/kubeshop/testkube/releases/download/${VERSION}/testkube_${VERSION#v}_Linux_x86_64.tar.gz" | tar -xz
+          sudo install kubectl-testkube /usr/local/bin/testkube
+          testkube disable telemetry
+
+      - name: Run Enterprise secret generator with the candidate kubectl image
+        env:
+          CANDIDATE_TAG: ${{ needs.build-candidate.outputs.candidate }}
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y expect
+          TARGET_NAMESPACE="kubectl-enterprise-pr-${{ github.event.pull_request.number || github.run_id }}-${GITHUB_RUN_ATTEMPT}"
+          echo "TARGET_NAMESPACE=$TARGET_NAMESPACE" >> "$GITHUB_ENV"
+          kubectl create namespace "$TARGET_NAMESPACE"
+
+          echo "::group::Install Enterprise with candidate kubectl image"
+          export TESTKUBE_INIT_COMMAND="testkube init demo --namespace $TARGET_NAMESPACE --no-confirm --license $LICENSE_KEY --helm-arg wait= --helm-arg timeout=10m --helm-set testkube-cloud-api.additionalEnv.FEATURE_SOURCE_OF_TRUTH_ON_ENV_CREATE=true --helm-set sharedSecretGenerator.image.registry=${{ secrets.GAR_LOCATION }}-docker.pkg.dev --helm-set sharedSecretGenerator.image.repository=${{ secrets.GCP_PROJECT_ID_PROD }}/testkube/kubectl --helm-set sharedSecretGenerator.image.tag=$CANDIDATE_TAG --verbose"
+          expect -c 'set timeout -1; spawn {*}$env(TESTKUBE_INIT_COMMAND); expect "Do you want to continue?"; send "y"; expect "Do you want to open the dashboard?"; send "n"; expect eof'
+          echo "::notice title=Enterprise installed::Namespace: $TARGET_NAMESPACE"
+          echo "::endgroup::"
+
+          echo "::group::Verify Enterprise secret-generator hook"
+          expected_image='${{ secrets.GAR_LOCATION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID_PROD }}/testkube/kubectl:'"$CANDIDATE_TAG"
+          helm get hooks testkube --namespace "$TARGET_NAMESPACE" | grep -Fx "          image: $expected_image"
+          echo "The completed secret-generator Job is deleted by its Helm hook-succeeded policy"
+          echo "::notice title=Enterprise secret-generator hook passed::Candidate image tag: $CANDIDATE_TAG"
+          echo "::endgroup::"
+
+          echo "::group::Verify generated Enterprise secrets"
+          for secret in testkube-default-agent-token testkube-minio-credentials testkube-credentials-master testkube-ai-internal-secret; do
+            kubectl -n "$TARGET_NAMESPACE" get secret "$secret"
+            echo "✓ Generated secret: $secret"
+          done
+          echo "::notice title=Enterprise secret validation passed::All expected secrets exist"
+          echo "::endgroup::"
+
+      - name: Collect Enterprise secret-generator diagnostics
+        if: failure()
+        run: |
+          echo "::group::Enterprise kubectl validation failure diagnostics"
+          echo "::group::Pods, jobs, and events"
+          kubectl -n "$TARGET_NAMESPACE" get pods,jobs,events --sort-by=.lastTimestamp || true
+          echo "::endgroup::"
+          echo "::group::Secret-generator Helm hook"
+          helm get hooks testkube --namespace "$TARGET_NAMESPACE" || true
+          echo "::endgroup::"
+          echo "::group::Secret-generator job logs, if retained"
+          kubectl -n "$TARGET_NAMESPACE" get job testkube-secret-generator >/dev/null 2>&1 && kubectl -n "$TARGET_NAMESPACE" logs job/testkube-secret-generator --all-containers --tail=200 || true
+          echo "::endgroup::"
+          echo "::endgroup::"
+
+      - name: Remove isolated Enterprise validation namespace
+        if: always()
+        run: kubectl delete namespace "$TARGET_NAMESPACE" --ignore-not-found --wait=false

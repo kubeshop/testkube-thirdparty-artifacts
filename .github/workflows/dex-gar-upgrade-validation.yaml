@@ -1,0 +1,255 @@
+name: Dex GAR Upgrade Validation
+
+on:
+  pull_request:
+    paths:
+      - dex/**
+  workflow_dispatch:
+    inputs:
+      baseline_ref:
+        description: Base branch or commit whose Dex version is the baseline
+        required: true
+        default: main
+        type: string
+      pr_number:
+        description: PR number used in the temporary GAR image tag
+        required: false
+        type: string
+
+concurrency:
+  group: dex-gar-upgrade-${{ github.event.pull_request.number || inputs.pr_number || github.run_id }}
+  cancel-in-progress: true
+
+env:
+  GAR_IMAGE: ${{ secrets.GAR_LOCATION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID_PROD }}/testkube/dex
+  DEV_GKE_CLUSTER_NAME: ${{ secrets.DEV_GKE_CLUSTER_NAME }}
+  DEV_GKE_LOCATION: ${{ secrets.DEV_GKE_LOCATION }}
+  GKE_PROJECT: ${{ secrets.GKE_PROJECT }}
+
+jobs:
+  build-candidate:
+    if: github.event.pull_request.head.repo.full_name == github.repository || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      id-token: write
+    environment: dev
+    outputs:
+      baseline: ${{ steps.versions.outputs.baseline }}
+      candidate: ${{ steps.versions.outputs.candidate }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Resolve baseline and candidate tags
+        id: versions
+        run: |
+          BASE_REF="${{ github.event.pull_request.base.sha || inputs.baseline_ref || github.sha }}"
+          CANDIDATE_SHA="${{ github.event.pull_request.head.sha || github.sha }}"
+          BASELINE_TAG="$(git show "$BASE_REF:dex/helm/Chart.yaml" | awk -F'"' '/^appVersion:/ { print $2; exit }')"
+          CANDIDATE_VERSION="$(awk -F'"' '/^appVersion:/ { print $2; exit }' dex/helm/Chart.yaml)"
+          test -n "$BASELINE_TAG"
+          test -n "$CANDIDATE_VERSION"
+          CANDIDATE_TAG="${CANDIDATE_VERSION}-pr-${{ github.event.pull_request.number || inputs.pr_number || github.run_id }}-${CANDIDATE_SHA::7}"
+          echo "baseline=$BASELINE_TAG" >> "$GITHUB_OUTPUT"
+          echo "candidate=$CANDIDATE_TAG" >> "$GITHUB_OUTPUT"
+          echo "::notice title=Dex versions::Baseline: $BASELINE_TAG; candidate: $CANDIDATE_TAG"
+
+      - name: GAR login
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ secrets.GAR_LOCATION }}-docker.pkg.dev
+          username: _json_key
+          password: ${{ secrets.GKE_SA_KEY_PROD }}
+
+      - name: Build and publish immutable candidate image to GAR
+        uses: docker/build-push-action@v6
+        with:
+          context: dex
+          file: dex/dex-release.dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ${{ env.GAR_IMAGE }}:${{ steps.versions.outputs.candidate }}
+
+  validate-enterprise:
+    needs: build-candidate
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      id-token: write
+    environment: dev
+    env:
+      BASELINE_TAG: ${{ needs.build-candidate.outputs.baseline }}
+      CANDIDATE_TAG: ${{ needs.build-candidate.outputs.candidate }}
+      LICENSE_KEY: ${{ secrets.LICENSE_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Authenticate to dev GKE using Federated Identity
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093
+        with:
+          workload_identity_provider: ${{ secrets.GKE_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GKE_SERVICE_ACCOUNT_EMAIL }}
+
+      - name: Configure dev GKE access
+        uses: google-github-actions/get-gke-credentials@v2
+        with:
+          cluster_name: ${{ secrets.DEV_GKE_CLUSTER_NAME }}
+          location: ${{ secrets.DEV_GKE_LOCATION }}
+          project_id: ${{ secrets.GKE_PROJECT }}
+
+      - name: Install Testkube CLI and Expect
+        run: |
+          VERSION="$(curl -fsSL https://api.github.com/repos/kubeshop/testkube/releases/latest | jq -r .tag_name)"
+          curl -fsSL "https://github.com/kubeshop/testkube/releases/download/${VERSION}/testkube_${VERSION#v}_Linux_x86_64.tar.gz" | tar -xz
+          sudo install kubectl-testkube /usr/local/bin/testkube
+          sudo apt-get update
+          sudo apt-get install -y expect
+          testkube disable telemetry
+
+      - name: Install Enterprise with baseline Dex
+        run: |
+          set -euo pipefail
+          TARGET_NAMESPACE="enterprise-dex-upgrade-pr-${{ github.event.pull_request.number || inputs.pr_number || github.run_id }}-${GITHUB_RUN_ATTEMPT}"
+          echo "TARGET_NAMESPACE=$TARGET_NAMESPACE" >> "$GITHUB_ENV"
+          kubectl create namespace "$TARGET_NAMESPACE"
+
+          registry='${{ secrets.GAR_LOCATION }}-docker.pkg.dev'
+          repository='${{ secrets.GCP_PROJECT_ID_PROD }}/testkube/dex'
+          echo "::group::Enterprise baseline Dex installation"
+          echo "Installing Dex baseline image: $BASELINE_TAG"
+          export TESTKUBE_INIT_COMMAND="testkube init demo --namespace $TARGET_NAMESPACE --no-confirm --license $LICENSE_KEY --helm-arg wait= --helm-arg timeout=15m --helm-set dex.image.registry=$registry --helm-set dex.image.repository=$repository --helm-set dex.image.tag=$BASELINE_TAG --helm-set dex.rbac.createClusterScoped=false --verbose"
+
+          expect -c '
+            set timeout 300
+            spawn {*}$env(TESTKUBE_INIT_COMMAND)
+            expect "Do you want to continue?"
+            send "y"
+            expect "Do you want to open the dashboard?"
+            send "n"
+            expect eof
+            lassign [wait] pid spawnid os_error_flag exit_status
+            exit $exit_status
+          '
+
+          echo "Enterprise installation completed"
+          helm -n "$TARGET_NAMESPACE" list
+          kubectl -n "$TARGET_NAMESPACE" get deployment/testkube-enterprise-dex -o wide
+          kubectl -n "$TARGET_NAMESPACE" get svc/testkube-enterprise-dex -o wide
+          kubectl -n "$TARGET_NAMESPACE" get pods -o wide
+          echo "::endgroup::"
+
+      - name: Validate Enterprise authentication across the Dex upgrade
+        run: |
+          set -euo pipefail
+          port_forward_pids=()
+
+          cleanup() {
+            for pid in "${port_forward_pids[@]}"; do
+              kill "$pid" >/dev/null 2>&1 || true
+              wait "$pid" 2>/dev/null || true
+            done
+          }
+          trap cleanup EXIT
+
+          # --- Start and verify a Kubernetes port-forward ---
+          start_port_forward() {
+            local service="$1" port="$2" endpoint="$3" log_file="$4"
+            echo "Starting port-forward for $service on localhost:$port"
+            kubectl -n "$TARGET_NAMESPACE" port-forward "$service" "$port:$port" >"$log_file" 2>&1 &
+            port_forward_pids+=("$!")
+            for attempt in $(seq 1 30); do
+              if curl -fsS "http://127.0.0.1:$port$endpoint" >/dev/null 2>&1; then
+                echo "Dex endpoint is reachable: http://127.0.0.1:$port$endpoint"
+                return 0
+              fi
+              sleep 1
+            done
+            cat "$log_file" >&2 || true
+            curl -fsS "http://127.0.0.1:$port$endpoint" >/dev/null
+          }
+
+          # --- Log in to Dex with the Enterprise demo account ---
+          login() {
+            echo "Requesting an ID token from Dex"
+            curl -fsS http://127.0.0.1:5556/token \
+              -d grant_type=password \
+              -d username=admin@example.com \
+              -d password=password \
+              -d 'scope=openid email groups offline_access' \
+              -d client_id=testkube-enterprise \
+              -d client_secret=QWkVzs3nct6HZM5hxsPzwaZtq | jq -er '.id_token' >/dev/null
+            echo "Dex returned an ID token"
+          }
+
+          start_port_forward svc/testkube-enterprise-dex 5556 /keys /tmp/enterprise-dex-port-forward.log
+          echo "::group::Enterprise baseline Dex login"
+          login
+          echo "::endgroup::"
+
+          # --- Enterprise Dex candidate upgrade ---
+          registry='${{ secrets.GAR_LOCATION }}-docker.pkg.dev'
+          repository='${{ secrets.GCP_PROJECT_ID_PROD }}/testkube/dex'
+          echo "::group::Enterprise Dex candidate upgrade"
+          echo "Upgrading Dex to candidate image: $CANDIDATE_TAG"
+          export TESTKUBE_INIT_COMMAND="testkube init demo --namespace $TARGET_NAMESPACE --no-confirm --license $LICENSE_KEY --helm-arg wait= --helm-arg timeout=15m --helm-set dex.image.registry=$registry --helm-set dex.image.repository=$repository --helm-set dex.image.tag=$CANDIDATE_TAG --helm-set dex.rbac.createClusterScoped=false --verbose"
+
+          expect -c '
+            set timeout 300
+            spawn {*}$env(TESTKUBE_INIT_COMMAND)
+            expect "Do you want to continue?"
+            send "y"
+            expect "Do you want to open the dashboard?"
+            send "n"
+            expect eof
+            lassign [wait] pid spawnid os_error_flag exit_status
+            exit $exit_status
+          '
+          # --- Confirm the Testkube components remain Ready ---
+          for workload in $(kubectl -n "$TARGET_NAMESPACE" get deployments,statefulsets -o name); do
+            echo "Waiting for $workload"
+            kubectl -n "$TARGET_NAMESPACE" rollout status "$workload" --timeout=5m
+          done
+          kubectl -n "$TARGET_NAMESPACE" get deployment/testkube-enterprise-dex -o wide
+          kubectl -n "$TARGET_NAMESPACE" get svc/testkube-enterprise-dex -o wide
+          kubectl -n "$TARGET_NAMESPACE" get pods -o wide
+          echo "::endgroup::"
+
+          # --- The Dex upgrade replaces the pod targeted by the baseline port-forward ---
+          cleanup
+          port_forward_pids=()
+          echo "::group::Reconnect to upgraded Dex"
+          start_port_forward svc/testkube-enterprise-dex 5556 /keys /tmp/enterprise-dex-port-forward.log
+          echo "::endgroup::"
+          echo "::group::Enterprise post-upgrade Dex login"
+          login
+          echo "::endgroup::"
+
+      - name: Collect Enterprise validation failure diagnostics
+        if: failure()
+        run: |
+          echo "::group::Dex validation failure diagnostics"
+          echo "::group::Resources"
+          kubectl -n "$TARGET_NAMESPACE" get deployment,svc,pods -o wide || true
+          echo "::endgroup::"
+          echo "::group::Events"
+          kubectl -n "$TARGET_NAMESPACE" get events --sort-by=.lastTimestamp || true
+          echo "::endgroup::"
+          echo "::group::Dex logs"
+          kubectl -n "$TARGET_NAMESPACE" logs deployment/testkube-enterprise-dex --all-containers --tail=100 || true
+          echo "::endgroup::"
+          echo "::group::Dex port-forward"
+          test -f /tmp/enterprise-dex-port-forward.log && cat /tmp/enterprise-dex-port-forward.log || true
+          echo "::endgroup::"
+          echo "::endgroup::"
+
+      - name: Remove isolated Enterprise installation
+        if: always()
+        run: kubectl delete namespace "$TARGET_NAMESPACE" --ignore-not-found --wait=false
