@@ -167,22 +167,30 @@ jobs:
           }
 
           # --- The API and Dex services are ClusterIP-only, so expose them temporarily on the runner. ---
+          echo "::group::Enterprise API and Dex connectivity"
           start_port_forward svc/testkube-enterprise-api 8088 /health /tmp/enterprise-api-port-forward.log
           start_port_forward svc/testkube-enterprise-dex 5556 /keys /tmp/enterprise-dex-port-forward.log
           id_token="$(curl -fsS http://127.0.0.1:5556/token -d grant_type=password -d username=admin@example.com -d password=password -d 'scope=openid email groups offline_access' -d client_id=testkube-enterprise -d client_secret=QWkVzs3nct6HZM5hxsPzwaZtq | jq -er '.id_token')"
           api_token="$(curl -fsS -X POST http://127.0.0.1:8088/organizations/tkcorg_demo/tokens -H "Authorization: Bearer $id_token" -H 'Content-Type: application/json' -d '{"name":"nats-upgrade-validation","scopes":[{"resource":"org","identifier":"tkcorg_demo","role":"admin"},{"resource":"env","identifier":"tkcenv_my-first-environment","role":"admin"}]}' | jq -er '.token')"
           testkube set context --namespace "$TARGET_NAMESPACE" --api-uri-override http://127.0.0.1:8088 --api-key "$api_token" --org-id tkcorg_demo --env-id tkcenv_my-first-environment
+          echo "::endgroup::"
 
           # --- Create the smoke TestWorkflow through the Enterprise API. ---
+          echo "::group::Create smoke TestWorkflow"
           curl -fsSL https://raw.githubusercontent.com/kubeshop/testkube/main/test/postman/crd-workflow/smoke.yaml -o /tmp/smoke.yaml
           awk 'BEGIN{n=0} /^---$/{n++; next} {print > ("/tmp/tw_" n ".yaml")}' /tmp/smoke.yaml
           for workflow in /tmp/tw_*.yaml; do testkube create testworkflow --update -f "$workflow"; done
+          echo "::endgroup::"
 
           # --- Record a baseline execution before the bundled NATS image is replaced. ---
+          echo "::group::Baseline TestWorkflow execution"
           baseline_execution_id="$(testkube --output go --go-template '{{.Id}}' run tw "$TEST_WORKFLOW_NAME" | tr -d '\r\n')"
           testkube watch twe "$baseline_execution_id"
+          echo "::notice title=Baseline execution passed::Execution ID: $baseline_execution_id"
+          echo "::endgroup::"
 
           # --- Upgrade the same Enterprise release; only its bundled NATS image changes. ---
+          echo "::group::Enterprise NATS candidate upgrade"
           registry='${{ secrets.GAR_LOCATION }}-docker.pkg.dev'
           repository='${{ secrets.GCP_PROJECT_ID_PROD }}/testkube/nats'
           export TESTKUBE_INIT_COMMAND="testkube init demo --namespace $TARGET_NAMESPACE --no-confirm --license $LICENSE_KEY --helm-arg wait= --helm-arg timeout=15m --helm-set nats.container.image.registry=$registry --helm-set nats.container.image.repository=$repository --helm-set nats.container.image.tag=$CANDIDATE_TAG --helm-set dex.rbac.createClusterScoped=false --helm-set testkube-ai-service.enabled=false --verbose"
@@ -197,31 +205,48 @@ jobs:
             lassign [wait] pid spawnid os_error_flag exit_status
             exit $exit_status
           '
+          echo "::endgroup::"
 
-          kubectl -n "$TARGET_NAMESPACE" rollout status statefulset/testkube-enterprise-nats --timeout=15m
           # --- Check that all Enterprise components reconnect after the NATS StatefulSet rolls. ---
+          echo "::group::Enterprise readiness after NATS upgrade"
+          kubectl -n "$TARGET_NAMESPACE" rollout status statefulset/testkube-enterprise-nats --timeout=15m
           for workload in $(kubectl -n "$TARGET_NAMESPACE" get deployments,statefulsets -o name); do
             kubectl -n "$TARGET_NAMESPACE" rollout status "$workload" --timeout=5m
           done
           curl -fsS http://127.0.0.1:8088/health/readiness >/dev/null
+          echo "::endgroup::"
 
           # --- The workflow and its baseline execution must remain visible after the bundled NATS upgrade. ---
+          echo "::group::NATS persistence checks"
           testkube --output go --go-template '{{.Name}}' get tw "$TEST_WORKFLOW_NAME" | grep -Fx "$TEST_WORKFLOW_NAME"
           IFS=, read -r persisted_id persisted_status <<< "$(testkube --output go --go-template '{{.Id}},{{.Result.Status}}' get twe "$baseline_execution_id" | tr -d '\r\n')"
           test "$persisted_id" = "$baseline_execution_id"
           test "$persisted_status" = passed
+          echo "::notice title=NATS persistence passed::Baseline execution is still passed"
+          echo "::endgroup::"
 
           # --- A second execution proves Enterprise reconnects to the candidate NATS image. ---
+          echo "::group::Post-upgrade TestWorkflow execution"
           post_upgrade_execution_id="$(testkube --output go --go-template '{{.Id}}' run tw "$TEST_WORKFLOW_NAME" | tr -d '\r\n')"
           testkube watch twe "$post_upgrade_execution_id"
+          echo "::notice title=Post-upgrade execution passed::Execution ID: $post_upgrade_execution_id"
+          echo "::endgroup::"
 
       - name: Collect Enterprise validation failure diagnostics
         if: failure()
         run: |
+          echo "::group::Pods"
           kubectl -n "$TARGET_NAMESPACE" get pods -o wide || true
+          echo "::endgroup::"
+          echo "::group::Warning events"
           kubectl -n "$TARGET_NAMESPACE" get events --field-selector type=Warning --sort-by=.lastTimestamp || true
+          echo "::endgroup::"
+          echo "::group::NATS logs"
           kubectl -n "$TARGET_NAMESPACE" logs statefulset/testkube-enterprise-nats --all-containers --tail=100 || true
+          echo "::endgroup::"
+          echo "::group::Enterprise API logs"
           kubectl -n "$TARGET_NAMESPACE" logs deployment/testkube-enterprise-api --all-containers --tail=100 || true
+          echo "::endgroup::"
 
       - name: Remove isolated Enterprise installation
         if: always()
