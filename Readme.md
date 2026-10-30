@@ -39,6 +39,7 @@ ensuring that Testkube provides secure and reliable versions of these platforms 
 | `dex-gar-upgrade-validation.yaml` | Pull requests changing Dex; manual dispatch | Verifies Enterprise Dex login before and after an upgrade |
 | `seaweed-gar-upgrade-validation.yaml` | Pull requests changing SeaweedFS; manual dispatch | Validates persisted artifacts and new executions across SeaweedFS upgrades |
 | `kubectl-gar-validation.yaml` | Pull requests changing kubectl; manual dispatch | Validates the candidate kubectl image in Testkube installation hooks |
+| `nats-gar-upgrade-validation.yaml` | Pull requests changing NATS; manual dispatch | Validates Enterprise Testkube executions before and after a bundled NATS upgrade |
 
 ### Update Flow
 
