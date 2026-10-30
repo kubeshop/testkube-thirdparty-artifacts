@@ -4,7 +4,6 @@ on:
   pull_request:
     paths:
       - nats/**
-      - .github/workflows/nats-gar-upgrade-validation.yaml
   workflow_dispatch:
     inputs:
       baseline_ref:
