@@ -201,7 +201,7 @@ jobs:
           kubectl create namespace "$TARGET_NAMESPACE"
 
           echo "::group::Install Enterprise with candidate kubectl image"
-          export TESTKUBE_INIT_COMMAND="testkube init demo --namespace $TARGET_NAMESPACE --no-confirm --license $LICENSE_KEY --helm-arg wait= --helm-arg timeout=10m --helm-set testkube-cloud-api.additionalEnv.FEATURE_SOURCE_OF_TRUTH_ON_ENV_CREATE=true --helm-set sharedSecretGenerator.image.registry=${{ secrets.GAR_LOCATION }}-docker.pkg.dev --helm-set sharedSecretGenerator.image.repository=${{ secrets.GCP_PROJECT_ID_PROD }}/testkube/kubectl --helm-set sharedSecretGenerator.image.tag=$CANDIDATE_TAG --verbose"
+          export TESTKUBE_INIT_COMMAND="testkube init demo --namespace $TARGET_NAMESPACE --no-confirm --license $LICENSE_KEY --helm-arg wait= --helm-arg timeout=10m --helm-set testkube-cloud-api.additionalEnv.FEATURE_SOURCE_OF_TRUTH_ON_ENV_CREATE=true --helm-set sharedSecretGenerator.image.registry=${{ secrets.GAR_LOCATION }}-docker.pkg.dev --helm-set sharedSecretGenerator.image.repository=${{ secrets.GCP_PROJECT_ID_PROD }}/testkube/kubectl --helm-set dex.rbac.createClusterScoped=false --helm-set sharedSecretGenerator.image.tag=$CANDIDATE_TAG --verbose"
           expect -c 'set timeout -1; spawn {*}$env(TESTKUBE_INIT_COMMAND); expect "Do you want to continue?"; send "y"; expect "Do you want to open the dashboard?"; send "n"; expect eof'
           echo "::notice title=Enterprise installed::Namespace: $TARGET_NAMESPACE"
           echo "::endgroup::"
