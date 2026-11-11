@@ -1,7 +1,7 @@
 # Stage 1: Build MongoDB tools with a patched Go toolchain and updated deps.
-# Go >= 1.25.7 / 1.26 fixes CVE-2025-68121 (crypto/tls). GOTOOLCHAIN=local forces
+# A pinned, current Go fixes the stdlib findings in the tools. GOTOOLCHAIN=local forces
 # the image's Go instead of the (older) version pinned in go.mod.
-FROM golang:1.26 AS builder
+FROM golang:1.27.3 AS builder
 
 ENV GOTOOLCHAIN=local
 
@@ -18,7 +18,8 @@ RUN git clone --depth 1 --branch ${TOOLS_VERSION}  https://github.com/mongodb/mo
 WORKDIR /build/mongo-tools
 
 # Bump vulnerable Go dependencies (x/crypto, x/net) and regenerate vendor dir.
-RUN go get golang.org/x/crypto@v0.47.0 golang.org/x/net@v0.48.0 && \
+RUN go get golang.org/x/crypto@v0.58.0 golang.org/x/net@v0.62.0 \
+      github.com/klauspost/compress@v1.18.7 && \
     go mod tidy && \
     go mod vendor
 
@@ -33,7 +34,7 @@ RUN go build -mod=vendor -o /usr/local/bin/mongostat ./mongostat/main/mongostat.
 RUN go build -mod=vendor -o /usr/local/bin/mongotop ./mongotop/main/mongotop.go
 
 # Stage 2: Template MongoDB configuration file
-FROM golang:1.26 AS template-builder
+FROM golang:1.27.3 AS template-builder
 
 ENV GOTOOLCHAIN=local
 
