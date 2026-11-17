@@ -29,9 +29,11 @@ RUN git clone --depth 1 --branch "${DEX_VERSION}" https://github.com/dexidp/dex.
 
 WORKDIR /usr/local/src/dex
 
-# Patch x/net in both modules; retain the newer dependencies supplied by Dex.
-RUN cd api/v2 && go get golang.org/x/net@v0.60.0 && go mod tidy
-RUN go get golang.org/x/net@v0.60.0 && go mod tidy
+# Patch x/net, x/crypto and go-jose in both modules; retain the newer dependencies
+# supplied by Dex.
+RUN cd api/v2 && go get golang.org/x/net@v0.62.0 && go mod tidy
+RUN go get golang.org/x/net@v0.62.0 golang.org/x/crypto@v0.58.0 \
+      github.com/go-jose/go-jose/v4@v4.1.6 && go mod tidy
 
 # Build static binaries. -buildvcs=false avoids stamping a "+dirty" pseudo
 # version (which otherwise breaks module version detection during CVE scans).
@@ -55,7 +57,8 @@ WORKDIR /usr/local/src
 RUN git clone --depth 1 --branch "${GOMPLATE_VERSION}" https://github.com/hairyhenderson/gomplate.git
 
 WORKDIR /usr/local/src/gomplate
-RUN go get google.golang.org/grpc@v1.84.0 golang.org/x/net@v0.60.0 \
+RUN go get google.golang.org/grpc@v1.84.0 golang.org/x/net@v0.62.0 \
+      golang.org/x/crypto@v0.58.0 github.com/go-jose/go-jose/v4@v4.1.6 \
       github.com/go-git/go-git/v5@v5.19.2 \
       go.opentelemetry.io/otel/sdk@v1.45.0 \
  && go mod tidy

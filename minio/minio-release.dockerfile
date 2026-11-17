@@ -1,7 +1,8 @@
 # Build stage.
-# Go >= 1.25.7 / 1.26.0 fixes CVE-2025-68121 (crypto/tls). GOTOOLCHAIN=local
-# forces the image's Go toolchain instead of the (older) version pinned in go.mod.
-FROM golang:1.26.0-alpine3.22 AS build
+# MinIO is archived upstream, so its CVEs are fixed only by rebuilding with a current
+# Go toolchain and dependencies. GOTOOLCHAIN=local forces the image's Go toolchain
+# instead of the (older) version pinned in go.mod.
+FROM golang:1.27.3-alpine3.24 AS build
 
 # Build arguments
 ARG TARGETOS
@@ -10,8 +11,15 @@ ARG GOMODCACHE="/root/.cache/go-build"
 ARG GOCACHE="/go/pkg"
 ARG MINIO_SERVER_VERSION=RELEASE.2025-10-15T17-29-55Z
 ARG MINIO_CLIENT_VERSION=RELEASE.2025-08-13T08-35-41Z
-# gRPC >= 1.79.3 fixes CVE-2026-33186 (authorization bypass).
-ARG GRPC_VERSION=v1.79.3
+# gRPC >= 1.84.0 fixes CVE-2026-33186 (authorization bypass) and later gRPC findings.
+ARG GRPC_VERSION=v1.84.0
+ARG X_CRYPTO_VERSION=v0.58.0
+ARG X_NET_VERSION=v0.62.0
+# amqp091-go >= 1.13.0 fixes three critical findings in the AMQP notification target.
+ARG AMQP091_VERSION=v1.13.0
+ARG COMPRESS_VERSION=v1.18.7
+ARG PROMETHEUS_VERSION=v0.311.3
+ARG WAIT_FOR_PORT_VERSION=v1.0.11
 
 ENV GOTOOLCHAIN=local
 
@@ -24,9 +32,14 @@ RUN apk update && apk add --no-cache git make bash perl
 # Git clone Minio server source code
 RUN git clone --depth 1 --branch "${MINIO_SERVER_VERSION}" https://github.com/minio/minio
 
-# Build Minio server binary (bump vulnerable gRPC dependency first)
+# Build Minio server binary (bump vulnerable dependencies first)
 RUN cd minio && \
-    go get google.golang.org/grpc@${GRPC_VERSION} && go mod tidy && \
+    go get google.golang.org/grpc@${GRPC_VERSION} golang.org/x/crypto@${X_CRYPTO_VERSION} \
+      golang.org/x/net@${X_NET_VERSION} github.com/rabbitmq/amqp091-go@${AMQP091_VERSION} \
+      github.com/klauspost/compress@${COMPRESS_VERSION} \
+      github.com/go-jose/go-jose/v4@v4.1.6 \
+      github.com/buger/jsonparser@v1.1.2 github.com/apache/thrift@v0.24.0 && \
+    go mod tidy && \
     GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
     GOMODCACHE=${GOMODCACHE} GOCACHE=${GOCACHE} \
     make build && cd ..
@@ -34,14 +47,24 @@ RUN cd minio && \
 # Git clone Minio Client source code
 RUN git clone --depth 1 --branch "${MINIO_CLIENT_VERSION}" https://github.com/minio/mc
 
-# Build Minio Client binary (bump vulnerable gRPC dependency first)
+# Build Minio Client binary (bump vulnerable dependencies first)
 RUN cd mc && \
-    go get google.golang.org/grpc@${GRPC_VERSION} && go mod tidy && \
+    go get google.golang.org/grpc@${GRPC_VERSION} golang.org/x/crypto@${X_CRYPTO_VERSION} \
+      golang.org/x/net@${X_NET_VERSION} github.com/klauspost/compress@${COMPRESS_VERSION} \
+      github.com/prometheus/prometheus@${PROMETHEUS_VERSION} && go mod tidy && \
     GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
     GOMODCACHE=${GOMODCACHE} GOCACHE=${GOCACHE} \
-    make build
+    make build && cd ..
 
-FROM debian:bookworm-slim
+# Build wait-for-port (used by the chart's provisioning job) from source: the
+# published release binaries are built with an old Go toolchain.
+RUN git clone --depth 1 --branch "${WAIT_FOR_PORT_VERSION}" https://github.com/bitnami/wait-for-port && \
+    cd wait-for-port && \
+    CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
+    go build -buildvcs=false -trimpath -ldflags "-s -w" -o /build/bin/wait-for-port .
+
+# Debian 13: most remaining OS findings on Debian 12 have no fix.
+FROM debian:trixie-slim
 
 ARG TARGETARCH
 
@@ -72,13 +95,7 @@ RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-reco
 # Use bash shell with strict error handling
 SHELL ["/bin/bash", "-o", "errexit", "-o", "nounset", "-o", "pipefail", "-c"]
 
-# TODO: replace with our own wait-for-port if needed
-# Install Bitnami wait-for-port utility.
-RUN curl -fsSL "https://github.com/bitnami/wait-for-port/releases/download/v1.0.10/wait-for-port-linux-${OS_ARCH}.tar.gz" -o /tmp/wait-for-port.tar.gz \
-  && tar -xzf /tmp/wait-for-port.tar.gz -C /tmp \
-  && install -m 0755 "$(find /tmp -maxdepth 1 -type f -name 'wait-for-port*' | head -n1)" /usr/local/bin/wait-for-port \
-  && find /tmp -maxdepth 1 -type f -name 'wait-for-port*' -delete \
-  && rm -f /tmp/wait-for-port.tar.gz
+COPY --from=build /build/bin/wait-for-port /usr/local/bin/wait-for-port
 
 # Create a non-root user for security
 # RUN groupadd -r minio-group && useradd -r -g minio-group minio-user
