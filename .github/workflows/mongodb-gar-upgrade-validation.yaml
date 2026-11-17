@@ -405,6 +405,7 @@ jobs:
           echo "::group::Enterprise MongoDB candidate upgrade"
           registry='${{ secrets.GAR_LOCATION }}-docker.pkg.dev'
           repository='${{ secrets.GCP_PROJECT_ID_PROD }}/testkube/mongodb'
+          upgrade_started="$(date +%s)"
           helm upgrade --install "$MONGODB_RELEASE" "$MONGODB_CHART" \
             --namespace "$TARGET_NAMESPACE" \
             --set image.registry="$registry" \
@@ -423,7 +424,21 @@ jobs:
 
           # --- Check if API and Worker service can reconnect to the new MongoDB pod ---
           echo "::group::Enterprise MongoDB client checks"
-          curl -fsS http://127.0.0.1:8088/health/readiness >/dev/null
+          # Recreate replaces the MongoDB pod, and the API takes a while to
+          # reconnect to the new one: retry readiness for up to 2 minutes and
+          # log each attempt, instead of checking once.
+          readiness_url=http://127.0.0.1:8088/health/readiness
+          for attempt in $(seq 1 24); do
+            code="$(curl -sS --max-time 5 -o /tmp/readiness.out -w '%{http_code}' "$readiness_url" 2>/tmp/readiness.err || true)"
+            elapsed=$(( $(date +%s) - upgrade_started ))
+            if [ "$code" = 200 ]; then
+              echo "API ready on attempt $attempt, ${elapsed}s after the MongoDB upgrade started"
+              break
+            fi
+            echo "API not ready (attempt $attempt/24, ${elapsed}s after upgrade start): HTTP ${code:-none} $(head -c 300 /tmp/readiness.out 2>/dev/null) $(head -c 200 /tmp/readiness.err 2>/dev/null)"
+            sleep 5
+          done
+          curl -fsS --max-time 5 "$readiness_url" >/dev/null
           for deployment in testkube-enterprise-api testkube-enterprise-worker-service; do
             kubectl -n "$TARGET_NAMESPACE" rollout status deployment/"$deployment" --timeout=5m
             kubectl -n "$TARGET_NAMESPACE" get deployment "$deployment" -o json | \
