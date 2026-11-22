@@ -16,7 +16,7 @@ RUN git clone --depth 1 --branch "${GOSU_VERSION}" https://github.com/tianon/gos
 WORKDIR /src/gosu
 RUN CGO_ENABLED=0 go build -buildvcs=false -trimpath -ldflags "-d -s -w" -o /gosu .
 
-FROM postgres:18.7
+FROM postgres:19.0
 
 LABEL maintainer="Testkube Team" \
       description="PostgreSQL - Testkube Edition"
