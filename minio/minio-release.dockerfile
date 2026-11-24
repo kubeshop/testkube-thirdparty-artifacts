@@ -32,14 +32,18 @@ RUN apk update && apk add --no-cache git make bash perl
 # Git clone Minio server source code
 RUN git clone --depth 1 --branch "${MINIO_SERVER_VERSION}" https://github.com/minio/minio
 
-# Build Minio server binary (bump vulnerable dependencies first)
+# Build Minio server binary (bump vulnerable dependencies first).
+# prometheus/prometheus >= 0.311.3 (CVE-2026-42151, CVE-2026-42154) pulls newer
+# go-openapi modules; plain `go mod tidy` then fails on a go-openapi *test-only*
+# import, so tidy with -e (any real missing package still fails `make build`).
 RUN cd minio && \
     go get google.golang.org/grpc@${GRPC_VERSION} golang.org/x/crypto@${X_CRYPTO_VERSION} \
       golang.org/x/net@${X_NET_VERSION} github.com/rabbitmq/amqp091-go@${AMQP091_VERSION} \
       github.com/klauspost/compress@${COMPRESS_VERSION} \
       github.com/go-jose/go-jose/v4@v4.1.6 \
-      github.com/buger/jsonparser@v1.1.2 github.com/apache/thrift@v0.24.0 && \
-    go mod tidy && \
+      github.com/buger/jsonparser@v1.1.2 github.com/apache/thrift@v0.24.0 \
+      github.com/prometheus/prometheus@${PROMETHEUS_VERSION} && \
+    go mod tidy -e && \
     GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
     GOMODCACHE=${GOMODCACHE} GOCACHE=${GOCACHE} \
     make build && cd ..
