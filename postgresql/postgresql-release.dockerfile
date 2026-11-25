@@ -21,9 +21,13 @@ FROM postgres:18.7
 LABEL maintainer="Testkube Team" \
       description="PostgreSQL - Testkube Edition"
 
-# Apply Debian security updates published after the upstream image was built.
+# Apply Debian security updates published after the upstream image was built
+# (krb5 1.21.3-5+deb13u2). Then purge GnuPG: upstream installs it only to fetch the
+# gosu and apt.postgresql.org signing keys at build time; PostgreSQL never uses it
+# (CVE-2026-24882, no Debian fix).
 RUN apt-get update \
  && apt-get upgrade -y --no-install-recommends \
+ && apt-get purge -y --auto-remove gnupg gnupg-l10n gpg gpg-agent gpgconf gpgsm dirmngr \
  && apt-get clean \
  && rm -rf /var/lib/apt/lists/*
 

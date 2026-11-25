@@ -111,7 +111,11 @@ RUN apt-get update && \
 # - gosu: not referenced by the Bitnami scripts (entrypoint runs as USER 1001)
 # - wait-for-port: not referenced by the Bitnami scripts
 # Both are outdated Go binaries and were the only remaining CRITICAL findings.
-RUN rm -f /usr/local/bin/gosu /usr/local/bin/wait-for-port
+# - js-yaml 3.13.1 (/opt/js-yaml, /js-yaml.js): only loaded by the upstream
+#   docker-entrypoint.sh to parse mongod config files; our entrypoint is
+#   /opt/bitnami/scripts/entrypoint.sh (CVE-2026-59869, CVE-2026-84375,
+#   GHSA-5p4m-2wfm-xmqj).
+RUN rm -rf /usr/local/bin/gosu /usr/local/bin/wait-for-port /opt/js-yaml /js-yaml.js
 
 # Copy render template binary
 COPY --from=template-builder /opt/bitnami/common/bin/render-template /opt/bitnami/common/bin/render-template
